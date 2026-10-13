@@ -18,4 +18,19 @@ You will receive access to the mobie staging app for the hackathon. You can crea
 
 For this challenge, the passenger account signed into the starter represents the caller. All calls to that starter search and book using this account, regardless of the incoming phone number. The team server already handles the API requests, but automatic phone-number matching to individual mobie users is not implemented or required. Matching callers to their own accounts, with appropriate identity verification and authorization, is a possible future extension.
 
-Submit a working phone assistant and a short description of its architecture, API usage and known limitations. Access details, the staging app, test rides, phone service and credit arrangements, and the submission deadline will be provided separately.
+## Evaluation
+
+The following organizer-provided rides, plus at least two additional rides designed and created by your team, will be used for evaluation. Dates and times are in Austrian local time. Each listed ride offers four seats.
+
+| Date | Time | Start | Destination |
+| --- | --- | --- | --- |
+| 2026-10-18 | 15:00 | Muthgasse 24, 1190 Wien | Stephansplatz, 1010 Wien |
+| 2026-10-19 | 15:00 | Villagarten 4, 4221 Steyregg | Bethlehemstraße, 4020 Linz |
+| 2026-10-20 | 15:00 | Muthgasse 24, 1190 Wien | Hauptstraße, 2531 Gaaden |
+| 2026-10-21 | 15:05 | Stephansplatz, 1010 Wien | Karlsplatz, 1040 Wien |
+| 2026-10-22 | 15:05 | Gartenstraße, 6832 Sulz | Gartenstraße, 6833 Klaus |
+| 2026-10-24 | 15:05 | Muthgasse 24, 1190 Wien | Flughafen Wien-Schwechat, 1300 Schwechat |
+
+Create at least two further rides with comparably challenging locations or spoken descriptions. For each, provide its date, time, start and destination (including postal codes), and explain what makes the case difficult and how your assistant resolves it. Evaluation will consider whether the assistant identifies the intended locations, finds the appropriate ride and submits a booking request only after the caller explicitly confirms it.
+
+Submit a working phone assistant and a short description of its architecture, API usage and known limitations. Access details, the staging app, phone service and credit arrangements, and the submission deadline will be provided separately.
