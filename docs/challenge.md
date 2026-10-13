@@ -12,7 +12,7 @@ Once the caller selects a ride, summarize the ride, pickup location, destination
 
 Use Mapbox or another geocoding service, POI search API or suitable location dataset, with your own account or credentials where required. Mapbox is optional: the starter demonstrates address and street geocoding, and you can extend or replace it to search for landmarks, stations and other points of interest. Send the resolved coordinates to mobie. Your data source must permit storing location data in mobie. You choose the phone platform, conversation design and implementation. At least one team member should speak German.
 
-An additional matcher for transcription errors is optional. The phone assistant can call your server for this step; use actual location data and, when necessary, a follow-up question to decide which coordinates to send to mobie.
+An additional matcher for transcription errors is optional. The phone assistant can call your server for this step; use actual location data and, when necessary, a follow-up question to decide which coordinates to send to mobie. You may limit your matcher to a smaller region or specific districts. Describe the exact geographic boundary, why you chose it and how the assistant handles requests outside it. A geographically restricted matcher is valid, but cannot receive the highest matcher evaluation.
 
 You will receive access to the mobie staging app for the hackathon. You can create as many test user accounts as you need, set up test rides and approve booking requests in the app. Use separate driver and passenger accounts; drivers need the appropriate approval and a vehicle before offering rides. Each running starter uses one signed-in passenger account at a time.
 
@@ -31,6 +31,6 @@ The following organizer-provided rides, plus at least two additional rides desig
 | 2026-10-22 | 15:05 | Gartenstraße, 6832 Sulz | Gartenstraße, 6833 Klaus |
 | 2026-10-24 | 15:05 | Muthgasse 24, 1190 Wien | Flughafen Wien-Schwechat, 1300 Schwechat |
 
-Create at least two further rides with comparably challenging locations or spoken descriptions. For each, provide its date, time, start and destination (including postal codes), and explain what makes the case difficult and how your assistant resolves it. Evaluation will consider whether the assistant identifies the intended locations, finds the appropriate ride and submits a booking request only after the caller explicitly confirms it.
+Create at least two further rides with comparably challenging locations or spoken descriptions, even if your matcher covers only a small region or district. Straightforward rides chosen merely to fit that boundary do not satisfy this requirement. For each, provide its date, time, start and destination (including postal codes), and explain what makes the case difficult and how your assistant resolves it. Evaluation will consider whether the assistant identifies the intended locations, finds the appropriate ride and submits a booking request only after the caller explicitly confirms it.
 
 Submit a working phone assistant and a short description of its architecture, API usage and known limitations. Access details, the staging app, phone service and credit arrangements, and the submission deadline will be provided separately.
