@@ -2,7 +2,7 @@
 
 Status: **proposed contract, not implemented**. Updated 14 October 2026.
 
-This design uses explicit departure/destination variables in Fonio. Requests carry their required context; there is no session-creation endpoint, `sessionId` or `addressRole` field. The existing `POST /api/addresses/receive-trip` remains a separate receipt-only test.
+This design uses explicit departure/destination variables in Fonio. Requests carry their required context; each body also carries `sessionId` as a call-correlation reference. There is no session-creation endpoint or `addressRole` field, and no stored conversation is required. The existing `POST /api/addresses/receive-trip` remains a separate receipt-only test.
 
 - [1. Overview](#1-overview)
 - [2. Fonio setup: general prompt and shared settings](#2-fonio-setup-general-prompt-and-shared-settings)
@@ -20,6 +20,7 @@ sequenceDiagram
     participant Fonio as Fonio dev call and voice assistant
     participant App as Our app
     Fonio-->>Caller: Brief introduction as the digital mobie assistant
+    Note over Fonio,App: Every HTTP request includes sessionId from the Fonio conversationLink system value
     Note over Caller,Fonio: Retain all volunteered address and travel details. Ask only for missing information
     loop Start using from tools, then destination using destination tools
         opt Neither postcode nor city supplied and postcode not already declared unknown
@@ -123,7 +124,7 @@ Fonio retains explicit values such as `from_postcode`, `from_city`, `from_street
 
 Each address request contains exactly one `from` or `destination` object. This replaces a generic addressRole field. The URL and populated object identify the operation; a request containing both objects on an address endpoint is invalid. Ride search and booking confirmation require both objects.
 
-The app must not rely on a global “current caller” or “current trip”. It validates the context supplied with each request. This approach can also isolate concurrent callers as long as Fonio keeps each conversation's variables separate. Session IDs could later help tracing or persistent conversations, but are not required for this contract.
+The app must not rely on a global “current caller” or “current trip”. It validates the context supplied with each request. This approach can also isolate concurrent callers as long as Fonio keeps each conversation's variables separate. The sessionId now links HTTP requests from the same call for tracing. It does not replace explicit address context or create a persistent conversation.
 
 The address/search workflow is **stateless in our app**. Fonio holds the conversation values and sends all required known information on every request. Our app does not retain caller context, address-search records or a current trip between requests.
 
@@ -149,6 +150,7 @@ For example, start-city search:
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": { "postcode": "4221", "city": "Steyregg" }
 }
 ```
@@ -157,6 +159,7 @@ The next start-address search includes that known context:
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "4221",
     "city": "Steyregg",
@@ -170,6 +173,7 @@ With an unknown postcode, city-first search uses the same route and an empty opt
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": { "postcode": "", "city": "Steyregg" }
 }
 ```
@@ -178,6 +182,7 @@ Once the city is accepted, address search can still proceed without a postcode:
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "",
     "city": "Steyregg",
@@ -219,7 +224,7 @@ Frage nach der Postleitzahl des Startorts nur, wenn weder Postleitzahl noch Stad
 Erfasse alle bereits genannten Angaben für Start, Ziel, Datum, Uhrzeit und Personenzahl sofort. Frage niemals erneut nach klaren vorhandenen Angaben.
 Validiere zuerst den Start, danach das Ziel: bekannte Postleitzahl, dann Stadt/Gemeinde, dann Straße und Hausnummer. Auch bei vollständig genannter Adresse validierst du im Hintergrund, ohne die Angaben nochmals abzufragen.
 Verwende dafür die Werkzeuge mit from im Namen. Wiederhole den Ablauf für das Ziel mit destination im Namen.
-Halte Start- und Zielvariablen strikt getrennt. Es gibt keine sessionId und keine addressRole im Request.
+Halte Start- und Zielvariablen strikt getrennt. Jede Anfrage enthält sessionId aus Fonios Systemwert conversationLink zur Zuordnung des Gesprächs. Dieser Wert wird im HTTP-Body eingesetzt, nicht vom Agenten erfunden oder von der anrufenden Person abgefragt. Es gibt keine addressRole im Request.
 Sende in jedem Werkzeug die bereits übernommenen Kontextwerte gemäß dessen Body mit.
 Übernimm kanonische Werte und Koordinaten exakt aus App-Antworten. Erfinde keine Namen, Hausnummern, Koordinaten oder Tokens.
 Nach jeder erfolgreichen Antwort mit status accepted kopiere die Felder aus accepted.from in die gleichnamigen from-Variablen und aus accepted.destination in die destination-Variablen.
@@ -328,6 +333,7 @@ Example: Fonio initially sends a city input such as `Stei regg`, but the app ret
 
 ```json
 {
+  "sessionId": "fonio-conversation-link-example",
   "status": "accepted",
   "message": "Wie lauten Straße und Hausnummer?",
   "accepted": { "from": { "postcode": "4221", "city": "Steyregg" } },
@@ -339,6 +345,7 @@ The next street/house-number request must contain the returned city spelling:
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "4221",
     "city": "Steyregg",
@@ -349,6 +356,28 @@ The next street/house-number request must contain the returned city spelling:
 ```
 
 Here postcode/city come from the prior app response. Street/house number are the caller's new input. Sending `Stei regg` again as the city context fails this contract, even if Fonio pronounced the correct name aloud.
+
+### 2.5 Session ID: Fonio system value, not conversation storage
+
+Add the following top-level field to **every** request body, including `/ride/join`:
+
+```json
+{
+  "sessionId": "{{conversationLink}}"
+}
+```
+
+This snippet is the common field, not a complete search body. All individual webhook templates below already include it.
+
+In Fonio's Request tab, place the cursor in the sessionId value, click **Add Variable**, and select the built-in conversation-link value. The [official HTTP Request guide](https://fonio.info/en/developers/http-request) documents `{{conversationLink}}`. Do not create a custom variable called sessionId and ask the AI to generate it. We have not verified a native `{{sessionId}}` placeholder or the exact conversation-ID placeholder in this account; do not invent either. If the picker exposes a native call/conversation ID, its verified system value can replace conversationLink consistently in all tools.
+
+Our field name is `sessionId`; its initial documented source is the **full conversation link**, treated as an opaque string rather than a UUID. Do not parse an ID from an assumed URL format or use the caller's phone number. Confirm it is stable across requests in one call and different between separate calls before relying on it for tracing.
+
+This metadata does not require storing session data in our app. The same request still contains postcode/city/address/trip context. sessionId is not an authentication token or proof of caller identity and does not make booking writes idempotent. It should not be spoken aloud.
+
+**Dev-interface test:** first inspect whether conversationLink is populated during a browser test. Fonio's [webhook guidance](https://fonio.info/en/setup/webhooks-and-variables) notes that browser tests do not expose all real-call data. Availability of this particular system value in dev tests is not yet verified. If absent, temporarily use a fixed unique value such as `"sessionId": "dev-manual-call-001"` in every tool body for that one test call. Use a new value for the next test and restore the system variable before real calls. Do not let the AI guess an ID or silently reuse a previous call's value.
+
+In the proposed backend, sessionId must be a nonempty string of at most 2048 characters, accepted as correlation metadata without fetching its URL. Echo it in conversational responses. No app-generated session-creation request is needed. On an invalid/missing value, return a validation error; a manual test ID is an explicit dev setup choice, not a backend fallback.
 
 ## 3. Fonio setup: individual webhooks
 
@@ -366,11 +395,14 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode_input}}"
   }
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -392,12 +424,15 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode}}",
     "city": "{{from_city_input}}"
   }
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -420,6 +455,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode}}",
     "city": "{{from_city_input}}"
@@ -429,6 +465,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   "reply": "{{selection_reply}}"
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -454,6 +492,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode}}",
     "city": "{{from_city}}",
@@ -462,6 +501,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   }
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -486,6 +527,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode}}",
     "city": "{{from_city}}",
@@ -497,6 +539,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   "reply": "{{selection_reply}}"
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -524,11 +568,14 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "destination": {
     "postcode": "{{destination_postcode_input}}"
   }
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -550,12 +597,15 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "destination": {
     "postcode": "{{destination_postcode}}",
     "city": "{{destination_city_input}}"
   }
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -578,6 +628,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "destination": {
     "postcode": "{{destination_postcode}}",
     "city": "{{destination_city_input}}"
@@ -587,6 +638,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   "reply": "{{selection_reply}}"
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -612,6 +665,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "destination": {
     "postcode": "{{destination_postcode}}",
     "city": "{{destination_city}}",
@@ -620,6 +674,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   }
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -644,6 +700,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "destination": {
     "postcode": "{{destination_postcode}}",
     "city": "{{destination_city}}",
@@ -655,6 +712,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   "reply": "{{selection_reply}}"
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -682,6 +741,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode}}",
     "city": "{{from_city}}",
@@ -706,6 +766,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   "seatsRequested": {{passenger_count}}
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -744,6 +806,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ```json
 {
+  "sessionId": "{{conversationLink}}",
   "from": {
     "postcode": "{{from_postcode}}",
     "city": "{{from_city}}",
@@ -771,6 +834,8 @@ Each section uses the shared method, timing, authorization and execution sentenc
   "reply": "{{booking_reply}}"
 }
 ```
+
+**System variable:** `conversationLink` is inserted with **Add Variable**; it supplies `sessionId` and must not be defined as an AI-extracted custom variable.
 
 **Custom variables**
 
@@ -804,7 +869,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 ### 4.1 Request context and identity
 
-Every request requires the starter key. Address endpoints accept exactly one populated `from` or `destination` object and use only its supplied fields. There is no backend current-address selector or evolving caller session. A response contains the same object key, so Fonio knows which specific variables to update.
+Every request requires the starter key and the same sessionId for the current call. sessionId is top-level metadata, outside from/destination, and must not be used to fill in missing address context. Address endpoints accept exactly one populated `from` or `destination` object and use only its supplied fields. There is no backend current-address selector or evolving caller session. A response contains the same object key, so Fonio knows which specific variables to update.
 
 The canonical `from` and `destination` shapes for ride search contain postcode, city, street, houseNumber, publicName, addressLine, longitude and latitude, as shown in the webhook bodies. Input postcode/houseNumber fields are strings. Coordinates are numeric and copied from geographic results. `seatsRequested` is the passenger count, an integer from 1 to 8. `time` is an ISO-8601 timestamp with an explicit offset or Z; resolve relative words using Europe/Vienna and the actual date. Do not silently default missing travel requirements.
 
@@ -816,12 +881,13 @@ The app forwards the resolved passenger coordinates, labels, time and seats to t
 
 ### 4.2 Response shape and options
 
-Successful conversational responses use HTTP 200 and include `status` and a short German `message`. Clarification, selection, no_rides and declined are conversational outcomes, not HTTP errors. Technical/validation errors use the HTTP statuses and error envelope in section 4.4. `accepted` contains validated canonical fields when the step has succeeded. With a single eligible city/address candidate, the app returns it in `accepted` immediately. Multiple candidates return a list for selection and do not populate accepted values prematurely.
+Successful conversational responses use HTTP 200 and include the unchanged `sessionId`, `status` and a short German `message`. The echoed ID supports tracing; Fonio still sources each request ID directly from its system variable. Clarification, selection, no_rides and declined are conversational outcomes, not HTTP errors. Technical/validation errors use the HTTP statuses and error envelope in section 4.4. `accepted` contains validated canonical fields when the step has succeeded. With a single eligible city/address candidate, the app returns it in `accepted` immediately. Multiple candidates return a list for selection and do not populate accepted values prematurely.
 
 Postcode example:
 
 ```json
 {
+  "sessionId": "fonio-conversation-link-example",
   "status": "accepted",
   "message": "In welcher Stadt oder Gemeinde möchtest du losfahren?",
   "accepted": { "from": { "postcode": "4221" } },
@@ -833,6 +899,7 @@ Illustrative city search with two fictional candidates:
 
 ```json
 {
+  "sessionId": "fonio-conversation-link-example",
   "status": "needs_selection",
   "message": "Option A: Musterstadt Nord. Option B: Musterstadt Süd. Welche Option meinst du?",
   "candidates": [
@@ -843,7 +910,7 @@ Illustrative city search with two fictional candidates:
 }
 ```
 
-The candidate references bind the original search input, its side (`from` or `destination`) and geographic context. Confirmation sends that same context, candidateToken and the caller's choice. The app verifies the self-contained token signature, context, completeness and expiry, then returns canonical values under `accepted`. It does not load a saved candidate record. No searchId or sessionId is required. The client must discard old references on corrections; without a caller-state store the app cannot know that another search happened, so it validates context/expiry rather than claiming to enforce a global “latest search”.
+The candidate references bind the original search input, its side (`from` or `destination`) and geographic context. Confirmation sends that same context, candidateToken and the caller's choice. The app verifies the self-contained token signature, context, completeness and expiry, then returns canonical values under `accepted`. It does not load a saved candidate record. No searchId or stored conversation is required. The supplied sessionId remains the call-correlation reference. The client must discard old references on corrections; without a caller-state store the app cannot know that another search happened, so it validates context/expiry rather than claiming to enforce a global “latest search”.
 
 An accepted city returns the canonical city and postcode if uniquely determinable, otherwise `postcode: ""`. A city may cover several postcodes; this does not require a postcode-choice question when city and later street/number can resolve the location. An accepted complete address returns canonical city/street/number, labels and coordinates, plus postcode when the provider supplies it, otherwise an empty string. Missing optional postcode alone must not block resolution. Missing required precision, coordinates or conflicting components require clarification rather than invented values. Unique matches use `selectionMethod: "automatic"`; caller choices use `selectionMethod: "caller_choice"`. Neither proves intended-location correctness.
 
@@ -885,7 +952,7 @@ For multiple rides, an A/B/C answer selects a proposal but does not book it. Rea
 
 ### 4.5 Acceptance checks
 
-1. No proposed request/response depends on sessionId, addressRole or a global current trip. All twelve Fonio tools map explicit variables to the seven app routes.
+1. Every body includes sessionId for correlation, while address processing depends on explicit context rather than a stored session or global current trip. There is no addressRole field. All twelve Fonio tools map explicit variables to the seven app routes.
 2. Start values never overwrite destination values. Parallel requests using different inputs do not share mutable address state.
 3. Clear valid supplied postcode and passenger count need no confirmation. Unknown postcode proceeds through city-first lookup, without a postcode tool call. Missing/unclear required city, address or passenger information asks for clarification.
 4. One city/address option advances automatically. Two or three use short A/B/C spoken labels and retain the exact chosen values after app validation, without another yes/no question. A repeat request preserves labels/tokens and triggers no new search. Zero options do not advance.
@@ -904,7 +971,7 @@ For multiple rides, an A/B/C answer selects a proposal but does not book it. Rea
 
 Run this against controlled test responses first, once the guided endpoints or a test fixture are available. Inspect the **actual next HTTP request body** in Fonio's tool trace and at our receiving endpoint; correct spoken output alone is insufficient evidence. Do not include authorization headers or real keys in shared evidence.
 
-1. Return a canonical city deliberately different from the spoken input, as in section 2.4. Verify that the next address request sends exactly that canonical city and the returned postcode.
+1. Check sessionId is nonempty and identical across all requests of one call, is echoed unchanged, and differs on a new call. Check dev and real-call metadata separately. Then return a canonical city deliberately different from the spoken input, as in section 2.4. Verify that the next address request sends exactly that canonical city and the returned postcode.
 2. Return canonical street/house-number values and distinct numeric coordinates. Verify that ride search sends exactly those returned values and numbers, rather than the original street input, rounded coordinates or invented values.
 3. Repeat for destination with different values. Confirm that none of the start variables changes.
 4. Return three options, choose B, and verify the selection request carries B's exact token plus the original query context. Verify the following request uses the accepted values returned by the selection response.
@@ -920,7 +987,7 @@ Record the response/next-request pairs as the evidence for chaining. If Fonio ca
 
 ### 4.7 Required development
 
-Implement the seven guided routes, optional-postcode/city-first lookup, processor integration, explicit context validation, short spoken labels, bounded options and self-contained signed candidate/proposal tokens. Configure volunteered-field reuse, repeat-option handling and corrections before booking in Fonio. Do not introduce conversation, search or proposal storage. Keep robust booking idempotency as an explicit future decision; unknown booking outcomes are checked in staging before retry. No guided routes are implemented today; the existing NestJS Mapbox/mobie adapters and receipt receiver are the available building blocks.
+Implement the seven guided routes, optional-postcode/city-first lookup, processor integration, explicit context validation, short spoken labels, bounded options and self-contained signed candidate/proposal tokens. Configure volunteered-field reuse, repeat-option handling and corrections before booking in Fonio. Pass through sessionId as correlation metadata without introducing conversation, search or proposal storage. Keep robust booking idempotency as an explicit future decision; unknown booking outcomes are checked in staging before retry. No guided routes are implemented today; the existing NestJS Mapbox/mobie adapters and receipt receiver are the available building blocks.
 
 Related: [architecture](../architecture/voice-ride-booking.md), [string processor scope](../architecture/voice-ride-booking.md#string-processor-scope-and-error-model), [existing API reference](../api.md), [working Fonio receipt setup](../packages/fonio-trip-receipt.md).
 
