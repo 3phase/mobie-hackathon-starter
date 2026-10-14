@@ -66,6 +66,24 @@ export class TripSearchService {
     return response;
   }
 
+  public join(rideId: unknown): Promise<unknown> {
+    if (typeof rideId !== 'string' || !rideId.trim()) {
+      throw new HttpError(400, 'rideId must be a non-empty string.');
+    }
+    const id = rideId.trim();
+    const search = this.records.find((record) => record.response.rideDetails?.rideId === id);
+    if (!search) {
+      throw new HttpError(404, 'Trip not found in recent searches. Search for the trip before joining it.');
+    }
+
+    return this.mobie.joinRide(id, {
+      departure: search.resolved.departure,
+      destination: search.resolved.destination,
+      time: search.request.time,
+      seatsRequested: 1,
+    }, true);
+  }
+
   public latest(): { result: TripSearchRecord | null } {
     return { result: this.records[0] ?? null };
   }

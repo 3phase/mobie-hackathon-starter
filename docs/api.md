@@ -172,6 +172,7 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `POST /api/addresses/receive` | `{ "query": "spoken address" }`; immediately acknowledges receipt without calling Mapbox or mobie |
 | `GET /api/addresses/received` | Returns the newest 20 in-memory address receipts; team key required, no passenger login needed |
 | `POST /api/trips/search` | String fields `departure`, `destination`, `time`, `seatsRequested`; normalizes and geocodes both locations, then returns a stable Fonio response containing the best-ranked ride |
+| `POST /api/trips/join` | `{ "rideId": "<ride.id>" }`; continues a recent completed trip search and requests one seat on the selected Mobie ride |
 | `GET /api/trips/latest` | Latest completed trip flow, including input, resolved locations, the Fonio response and the raw response under `mobieResponse`; used by the browser |
 | `POST /api/locations/search` | `{ "query": "Stephansplatz 1, Wien" }`; returns `{ "candidates": [...], "attribution": "..." }` |
 | `POST /api/rides/search` | Same basic location/time/seat payload as mobie |
@@ -180,6 +181,8 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `GET /api/rides/{rideId}/rider-detail` | Proxies approved-passenger details |
 
 The `confirmed` boolean must reflect actual spoken consent; setting it automatically defeats its purpose. This starter does not prove consent cryptographically or persist call state. No automatic retries are performed for writes.
+
+`POST /api/trips/join` is the Fonio-oriented consent action: call it only after the passenger has explicitly agreed to the selected ride. It requires the ride to be present in one of the 20 most recent completed searches and always requests exactly one seat.
 
 The end-to-end search endpoint accepts a Fonio-friendly body:
 

@@ -28,8 +28,13 @@ const config: AppConfig = {
   port: 3000, host: '127.0.0.1',
 };
 
-async function fixture(t: test.TestContext): Promise<{ app: INestApplication; writes: () => number }> {
+async function fixture(t: test.TestContext): Promise<{
+  app: INestApplication;
+  writes: () => number;
+  joinedPayloads: () => Record<string, unknown>[];
+}> {
   let writes = 0;
+  const joinedPayloads: Record<string, unknown>[] = [];
   const fetch: FetchFunction = async (input, init) => {
     const url = String(input);
     if (url.endsWith('/oauth/token')) {
@@ -41,7 +46,9 @@ async function fixture(t: test.TestContext): Promise<{ app: INestApplication; wr
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer private-access');
     if (url.endsWith('/join-detailed')) {
       writes += 1;
-      assert.equal((JSON.parse(init?.body as string) as Record<string, unknown>).confirmed, undefined);
+      const joinedPayload = JSON.parse(init?.body as string) as Record<string, unknown>;
+      assert.equal(joinedPayload.confirmed, undefined);
+      joinedPayloads.push(joinedPayload);
       return Response.json({ rideRequest: { id: 'request-1', status: 'PENDING' }, suggestions: [] });
     }
     if (url.endsWith('/rides/search')) return Response.json(rideSearchResponse);
@@ -56,7 +63,7 @@ async function fixture(t: test.TestContext): Promise<{ app: INestApplication; wr
   configureApplication(app);
   await app.init();
   t.after(async () => app.close());
-  return { app, writes: () => writes };
+  return { app, writes: () => writes, joinedPayloads: () => joinedPayloads };
 }
 
 async function signIn(app: INestApplication): Promise<{ cookie: string; authorize: URL }> {
@@ -167,13 +174,13 @@ test('address receipt works without upstream login and can be inspected only wit
 });
 
 test('inbound trip strings flow through Mapbox and Mobie and return a Fonio response', async (t) => {
-  const { app } = await fixture(t);
+  const { app, writes, joinedPayloads } = await fixture(t);
   await signIn(app);
   const trip = {
     departure: ' Villagarten   4, 4221 Steyregg ',
     destination: ' Bethlehemstraße, 4020 Linz ',
     time: '2026-10-15T18:00:00',
-    seatsRequested: '1',
+    seatsRequested: '2',
   };
   const search = await request(app.getHttpServer())
     .post('/api/trips/search')
@@ -203,8 +210,42 @@ test('inbound trip strings flow through Mapbox and Mobie and return a Fonio resp
     departure: 'Villagarten 4, 4221 Steyregg',
     destination: 'Bethlehemstraße, 4020 Linz',
     time: '2026-10-15T18:00:00+02:00',
-    seatsRequested: 1,
+    seatsRequested: 2,
   });
   assert.equal(latest.body.result.resolved.departure.longitude, 16.3);
   assert.equal(latest.body.result.resolved.destination.latitude, 48.2);
+
+  const joined = await request(app.getHttpServer())
+    .post('/api/trips/join')
+    .set('Authorization', authorization)
+    .send({ rideId: 'ride-1' })
+    .expect(200);
+  assert.equal(joined.body.rideRequest.status, 'PENDING');
+  assert.equal(writes(), 1);
+  assert.equal(joinedPayloads()[0]?.seatsRequested, 1);
+});
+
+test('trip join requires a string ID from a recent completed search', async (t) => {
+  const { app, writes } = await fixture(t);
+  await signIn(app);
+
+  const missingId = await request(app.getHttpServer())
+    .post('/api/trips/join')
+    .set('Authorization', authorization)
+    .send({});
+  assert.deepEqual({ status: missingId.status, body: missingId.body }, {
+    status: 400,
+    body: { error: 'rideId must be a non-empty string.' },
+  });
+  await request(app.getHttpServer())
+    .post('/api/trips/join')
+    .set('Authorization', authorization)
+    .send({ rideId: 123 })
+    .expect(400, { error: 'rideId must be a non-empty string.' });
+  await request(app.getHttpServer())
+    .post('/api/trips/join')
+    .set('Authorization', authorization)
+    .send({ rideId: 'unknown-ride' })
+    .expect(404, { error: 'Trip not found in recent searches. Search for the trip before joining it.' });
+  assert.equal(writes(), 0);
 });
