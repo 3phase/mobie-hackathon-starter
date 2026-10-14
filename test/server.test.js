@@ -82,3 +82,23 @@ test('invalid JSON is rejected and logging out removes access for subsequent req
   assert.equal((await fetch(`${url}/api/me`, { headers })).status, 401);
   assert.equal((await fetch(`${url}/api/admin/users`, { headers })).status, 404);
 });
+
+test('address receipt works without upstream login and can be inspected only with the team key', async t => {
+  const { url, writes } = await fixture(t);
+  const query = 'Villagarten vier, Steyregg';
+  assert.equal((await fetch(`${url}/api/addresses/received`)).status, 401);
+  assert.equal((await fetch(`${url}/api/addresses/receive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) })).status, 401);
+  const response = await fetch(`${url}/api/addresses/receive`, { method: 'POST', headers, body: JSON.stringify({ query }) });
+  assert.equal(response.status, 200);
+  const receipt = await response.json();
+  assert.equal(receipt.received, true);
+  assert.equal(receipt.query, query);
+  assert.ok(Number.isFinite(Date.parse(receipt.receivedAt)));
+  const history = await (await fetch(`${url}/api/addresses/received`, { headers })).json();
+  assert.deepEqual(history.receipts, [{ id: receipt.id, query, receivedAt: receipt.receivedAt }]);
+  const invalid = await fetch(`${url}/api/addresses/receive`, { method: 'POST', headers, body: JSON.stringify({ query: ' ' }) });
+  assert.equal(invalid.status, 400);
+  assert.equal((await (await fetch(`${url}/api/addresses/received`, { headers })).json()).receipts.length, 1);
+  assert.equal(writes(), 0);
+  assert.equal((await fetch(`${url}/api/status`, { headers }).then(r => r.json())).authenticated, false);
+});

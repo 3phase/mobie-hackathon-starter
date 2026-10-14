@@ -11,6 +11,25 @@ async function request(path, method = 'GET') {
   return data;
 }
 function showError(error) { message.textContent = error.message; }
+
+document.querySelector('#refresh-addresses').addEventListener('click', async () => {
+  const status = document.querySelector('#addresses-status');
+  const list = document.querySelector('#received-addresses');
+  try {
+    const { receipts } = await request('/api/addresses/received');
+    list.replaceChildren();
+    for (const receipt of receipts) {
+      const item = document.createElement('li');
+      const time = new Date(receipt.receivedAt).toLocaleString('de-AT', { timeZone: 'Europe/Vienna' });
+      item.textContent = `${time} — ${receipt.query}`;
+      list.append(item);
+    }
+    status.textContent = receipts.length ? `${receipts.length} address(es) received. Newest first.` : 'No addresses received yet.';
+  } catch (error) {
+    list.replaceChildren();
+    status.textContent = error.message;
+  }
+});
 document.querySelector('#login-form').addEventListener('submit', async event => {
   event.preventDefault();
   try {

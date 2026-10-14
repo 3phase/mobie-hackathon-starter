@@ -15,6 +15,14 @@
 </form>
 <p id="message" role="status" aria-live="polite"></p>
 <p>After signing in, enter your team key again and check the API connection. The key is not stored in the browser.</p>
+<section aria-labelledby="received-heading">
+<h2 id="received-heading">Received addresses</h2>
+<p>Enter the team key above and refresh to see addresses received from the phone assistant. No mobie login is needed for this test.</p>
+<button type="button" id="refresh-addresses">Refresh received addresses</button>
+<p id="addresses-status" role="status" aria-live="polite"></p>
+<ul id="received-addresses"></ul>
+<p>The latest 20 addresses are kept in memory. Restarting the server clears this list.</p>
+</section>
 <p>See the README and docs/api.md in your repository for documentation and example requests.</p>
 <p>Tokens stay in memory. You must sign in again after restarting the server.</p>
 </main>

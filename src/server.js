@@ -2,6 +2,7 @@ import { createServer as httpServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createAuth, equalSecret } from './auth.js';
 import { createMobieClient } from './mobie.js';
 import { createMapboxClient } from './mapbox.js';
@@ -31,6 +32,7 @@ export function createServer(config, services = {}) {
   const auth = services.auth ?? createAuth(config);
   const mobie = services.mobie ?? createMobieClient({ baseUrl: config.baseUrl, getAccessToken: auth.getAccessToken });
   const mapbox = services.mapbox ?? createMapboxClient({ token: config.mapboxToken });
+  const addressReceipts = [];
   const secureCookie = new URL(config.redirectUri).protocol === 'https:' ? '; Secure' : '';
   const cookie = (state, maxAge) => `mobie_oauth_state=${state}; Path=/callback; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secureCookie}`;
 
@@ -72,6 +74,19 @@ export function createServer(config, services = {}) {
       }
       if (req.method === 'GET' && url.pathname === '/api/status') return json(200, auth.status());
       if (req.method === 'GET' && url.pathname === '/api/me') return json(200, await mobie.me());
+      if (req.method === 'GET' && url.pathname === '/api/addresses/received') {
+        return json(200, { receipts: addressReceipts });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/addresses/receive') {
+        const { query } = await readJson(req);
+        if (typeof query !== 'string' || !query.trim() || query.length > 256) {
+          throw new HttpError(400, 'query must be a non-empty address string of at most 256 characters.');
+        }
+        const receipt = { id: randomUUID(), query, receivedAt: new Date().toISOString() };
+        addressReceipts.unshift(receipt);
+        if (addressReceipts.length > 20) addressReceipts.pop();
+        return json(200, { received: true, ...receipt, message: 'Die Adresse ist in unserer App angekommen.' });
+      }
       if (req.method === 'POST' && url.pathname === '/api/locations/search') {
         return json(200, await mapbox.searchLocations((await readJson(req)).query));
       }

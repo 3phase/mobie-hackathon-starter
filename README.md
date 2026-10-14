@@ -4,6 +4,8 @@ Build a German-speaking phone assistant that finds rides and sends real booking 
 
 This starter provides Auth0 login with PKCE, automatic token renewal, a small REST client and a server your phone assistant can call. It uses **Node.js built-ins only**, with no runtime dependencies.
 
+Team specifications, architecture, package guides and implementation plans are in the [project documentation index](docs/README.md). The [architecture deck](docs/architecture/mobie-architecture-slides.html) describes our Fonio integration and the passenger and driver processes. Open the HTML deck locally in a browser.
+
 **One running starter = one staging test passenger.** Every caller handled by that starter acts as that passenger. It does not identify real passengers by caller phone number. Use separate instances/accounts for separate team passengers. A booking request still needs the driver's approval.
 
 For the demo, the account you sign into in the starter's browser login represents the caller. Requests already pass through the team server, which uses that account's Auth0 token. If someone calls from a different phone number, their searches and booking requests still use the same signed-in account. Caller phone-number matching is not implemented in this starter and is not required for the challenge. A future version could associate callers with their own mobie accounts, with appropriate identity verification and authorization to act for each user.
