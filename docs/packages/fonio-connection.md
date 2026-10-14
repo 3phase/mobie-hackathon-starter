@@ -56,7 +56,7 @@ Define these custom variables as strings:
 
 - `departure`: confirmed start address with street, house number, postcode and municipality.
 - `destination`: confirmed destination address with street, house number, postcode and municipality.
-- `time`: confirmed ISO-8601 datetime with `Z` or an explicit offset.
+- `time`: confirmed ISO-8601 datetime. A timezone-less value from Fonio is interpreted in `Europe/Vienna`.
 - `seats_requested`: confirmed integer from 1 to 8.
 
 Set the execution sentence under **Advanced** to:

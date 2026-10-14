@@ -18,11 +18,27 @@ test('trip strings are normalized before provider calls', () => {
   });
 });
 
+test('Fonio local datetimes receive the date-appropriate Europe/Vienna offset', () => {
+  const base = { departure: 'Steyregg', destination: 'Linz' };
+
+  assert.equal(service.processTripSearch({
+    ...base,
+    time: '2026-10-15T18:00:00',
+  }).time, '2026-10-15T18:00:00+02:00');
+
+  assert.equal(service.processTripSearch({
+    ...base,
+    time: '2026-12-15T18:00:00',
+  }).time, '2026-12-15T18:00:00+01:00');
+});
+
 test('invalid trip strings fail before Mapbox or Mobie can be called', () => {
   for (const input of [
     { departure: '', destination: 'Linz', time: '2026-10-19T15:00:00+02:00' },
     { departure: 'Steyregg', destination: ' ', time: '2026-10-19T15:00:00+02:00' },
     { departure: 'Steyregg', destination: 'Linz', time: 'tomorrow' },
+    { departure: 'Steyregg', destination: 'Linz', time: '2026-02-30T15:00:00' },
+    { departure: 'Steyregg', destination: 'Linz', time: '2026-03-29T02:30:00' },
     { departure: 'Steyregg', destination: 'Linz', time: '2026-10-19T15:00:00+02:00', seatsRequested: 'nine' },
   ]) {
     assert.throws(() => service.processTripSearch(input), (error: unknown) =>

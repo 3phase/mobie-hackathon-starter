@@ -7,7 +7,7 @@ export class TripSearchDto {
   @IsDefined({ message: 'destination must be a string.' })
   public destination!: unknown;
 
-  @IsDefined({ message: 'time must be an ISO-8601 datetime with Z or an explicit offset (e.g. +02:00).' })
+  @IsDefined({ message: 'time must be an ISO-8601 datetime; values without an offset are interpreted in Europe/Vienna.' })
   public time!: unknown;
 
   @IsOptional()

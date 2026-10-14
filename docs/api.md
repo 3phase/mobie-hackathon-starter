@@ -63,7 +63,7 @@ Neither the direct REST search nor the join endpoint performs free-text address 
 
 Change the date and locations to match real event test rides. `departure`, `destination` and a usable `time` are necessary. Always provide `seatsRequested` (1–8 for search); the starter defaults it to 1.
 
-The backend accepts an ISO-8601 instant/offset datetime or a local datetime interpreted in `Europe/Vienna`. **The starter deliberately requires `Z` or an explicit offset** to avoid timezone ambiguity. Austria's offset depends on the date; do not hard-code `+02:00` throughout the year. Relative words such as “tomorrow” must be converted by the assistant. The direct REST API has no `from`, `to`, `date`, `timeWindow` or `seats` fields from the old voice tools.
+The backend accepts an ISO-8601 instant/offset datetime or a local datetime interpreted in `Europe/Vienna`. Austria's offset depends on the date; the starter adds the date-appropriate offset rather than hard-coding `+02:00` throughout the year. Relative words such as “tomorrow” must be converted by the assistant. The direct REST API has no `from`, `to`, `date`, `timeWindow` or `seats` fields from the old voice tools.
 
 Success is HTTP 200 with a **JSON array**, including `[]` when no matches exist. It is not `{ "status": "OK", "rides": [...] }`.
 
@@ -192,7 +192,7 @@ The end-to-end search endpoint accepts a Fonio-friendly body:
 }
 ```
 
-Whitespace is normalized and a numeric seat string is converted to a number. `time` must already contain an ISO-8601 timezone. Mapbox's first candidate for each address is sent to Mobie; callers should therefore provide street, house number, postcode and municipality to avoid ambiguity. The endpoint searches only and never books a ride.
+Whitespace is normalized and a numeric seat string is converted to a number. A timezone-less `time` is interpreted in `Europe/Vienna` and receives the date-appropriate offset before it is sent to Mobie. Mapbox's first candidate for each address is sent to Mobie; callers should therefore provide street, house number, postcode and municipality to avoid ambiguity. The endpoint searches only and never books a ride.
 
 The starter only forwards its explicitly listed routes and fields, not arbitrary URLs or administrative APIs. Request bodies are limited to 16 KiB. Its own errors use `{ "error": "..." }` (400 invalid payload/consent, 401 missing key/login, 404 route, 413 size, 415 content type, 502 upstream network/JSON issue, 503 missing Mapbox token). A timeout may have an unknown write outcome.
 

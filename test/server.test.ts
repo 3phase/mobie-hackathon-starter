@@ -167,7 +167,7 @@ test('inbound trip strings flow through Mapbox and Mobie and the raw response is
   const trip = {
     departure: ' Villagarten   4, 4221 Steyregg ',
     destination: ' Bethlehemstraße, 4020 Linz ',
-    time: '2026-10-19T15:00:00+02:00',
+    time: '2026-10-15T18:00:00',
     seatsRequested: '1',
   };
   const search = await request(app.getHttpServer())
@@ -185,7 +185,7 @@ test('inbound trip strings flow through Mapbox and Mobie and the raw response is
   assert.deepEqual(latest.body.result.request, {
     departure: 'Villagarten 4, 4221 Steyregg',
     destination: 'Bethlehemstraße, 4020 Linz',
-    time: trip.time,
+    time: '2026-10-15T18:00:00+02:00',
     seatsRequested: 1,
   });
   assert.equal(latest.body.result.resolved.departure.longitude, 16.3);
