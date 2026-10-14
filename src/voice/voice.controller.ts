@@ -1,14 +1,13 @@
 import { Body, Controller, HttpCode, Inject, Post, UseGuards } from '@nestjs/common';
 import { JsonContentTypeGuard } from '../common/guards/json-content-type.guard.js';
-import { TripSearchService } from '../inbound/trip-search.service.js';
 import { AddressConfirmDto } from './dto/address-confirm.dto.js';
 import { AddressSearchDto } from './dto/address-search.dto.js';
+import { BookingConfirmDto } from './dto/booking-confirm.dto.js';
 import { CallEndDto } from './dto/call-end.dto.js';
 import { CityConfirmDto } from './dto/city-confirm.dto.js';
 import { CitySearchDto } from './dto/city-search.dto.js';
 import { PostcodeSearchDto } from './dto/postcode-search.dto.js';
 import { VoiceRideSearchDto } from './dto/ride-search.dto.js';
-import { TripJoinDto } from '../inbound/dto/trip-join.dto.js';
 import { VoiceOrchestrationService } from './services/voice-orchestration.service.js';
 
 @Controller('api/voice')
@@ -61,12 +60,12 @@ export class VoiceController {
 
 @Controller('ride')
 export class VoiceBookingController {
-  public constructor(@Inject(TripSearchService) private readonly trips: TripSearchService) {}
+  public constructor(@Inject(VoiceOrchestrationService) private readonly voice: VoiceOrchestrationService) {}
 
   @Post('join')
   @HttpCode(200)
   @UseGuards(JsonContentTypeGuard)
-  public join(@Body() body: TripJoinDto): Promise<unknown> {
-    return this.trips.join(body.rideId);
+  public join(@Body() body: BookingConfirmDto) {
+    return this.voice.confirmBooking(body);
   }
 }

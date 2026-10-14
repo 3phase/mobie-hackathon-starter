@@ -174,13 +174,21 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `POST /api/trips/search` | String fields `departure`, `destination`, `time`, `seatsRequested`; normalizes and geocodes both locations, then returns a stable Fonio response containing the best-ranked ride |
 | `POST /api/trips/join` | `{ "rideId": "<ride.id>" }`; continues a recent completed trip search and requests one seat on the selected Mobie ride |
 | `GET /api/trips/latest` | Latest completed trip flow, including input, resolved locations, the Fonio response and the raw response under `mobieResponse`; used by the browser |
+| `POST /api/voice/postcodes/search` | Guided Fonio postcode validation; body contains `sessionId` and exactly one of `from` or `destination` |
+| `POST /api/voice/cities/search` | Guided city lookup with explicit side context and optional postcode |
+| `POST /api/voice/cities/confirm` | Resolves a caller-selected city option letter (`A`, `B`, or `C`) against the current session and original context |
+| `POST /api/voice/addresses/search` | Resolves a complete explicit address to canonical fields and coordinates |
+| `POST /api/voice/addresses/confirm` | Resolves a caller-selected address option letter (`A`, `B`, or `C`) against the current session and original context |
+| `POST /api/voice/rides/search` | Searches with complete canonical `from` and `destination` objects, `time`, and `seatsRequested` |
+| `POST /api/voice/sessions/end` | Deletes the in-memory state for the supplied `sessionId` |
+| `POST /ride/join` | Resolves an option letter from the latest ride search stored for `sessionId` and requires explicit `confirmed` booking consent |
 | `POST /api/locations/search` | `{ "query": "Stephansplatz 1, Wien" }`; returns `{ "candidates": [...], "attribution": "..." }` |
 | `POST /api/rides/search` | Same basic location/time/seat payload as mobie |
 | `POST /api/rides/{rideId}/join-detailed` | Same basic payload **plus `confirmed: true`** |
 | `GET /api/rides/{rideId}` | Proxies driver-only details |
 | `GET /api/rides/{rideId}/rider-detail` | Proxies approved-passenger details |
 
-The `confirmed` boolean must reflect actual spoken consent; setting it automatically defeats its purpose. This starter does not prove consent cryptographically or persist call state. No automatic retries are performed for writes.
+The `confirmed` boolean must reflect actual spoken consent; setting it automatically defeats its purpose. Voice call state is kept in memory for 45 minutes of inactivity and can be ended explicitly. No automatic retries are performed for writes.
 
 `POST /api/trips/join` is the Fonio-oriented consent action: call it only after the passenger has explicitly agreed to the selected ride. It requires the ride to be present in one of the 20 most recent completed searches and always requests exactly one seat.
 
@@ -216,7 +224,9 @@ It returns the caller metadata together with the first, best-ranked Mobie sugges
 
 `rideDetails` is omitted and `status` is `no_ride_found` if the Mobie array is empty or its first entry has no ride ID. Otherwise, `status` is `ride_found`. `pickupTime` uses Mobie's `pickupEta`, converted to the Vienna offset, when available; otherwise it retains the requested time. The optional German `message` is ready for Fonio to speak.
 
-The starter only forwards its explicitly listed routes and fields, not arbitrary URLs or administrative APIs. Request bodies are limited to 16 KiB. Its own errors use `{ "error": "..." }` (400 invalid payload/consent, 401 missing key/login, 404 route, 413 size, 415 content type, 502 upstream network/JSON issue, 503 missing Mapbox token). A timeout may have an unknown write outcome.
+The complete guided request/response schemas are defined in [fonio-guided-booking-contract.md](specs/fonio-guided-booking-contract.md). `sessionId` selects the in-memory call state; the first lookup creates it automatically, and `/api/voice/sessions/end` removes it.
+
+The starter only forwards its explicitly listed routes and fields, not arbitrary URLs or administrative APIs. Request bodies are limited to 16 KiB. Non-guided endpoints use `{ "error": "..." }`; guided endpoints use `{ "error": { "code": "...", "message": "..." } }`. A timeout during `/ride/join` returns the conversational `booking_outcome_unknown` status and must not be retried automatically.
 
 ## First requests
 

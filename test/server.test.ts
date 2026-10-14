@@ -21,6 +21,10 @@ const rideSearchResponse = [{
   ride: { id: 'ride-1', time: '2026-10-15T16:00:00Z' },
   driver: { id: 'driver-1', firstName: 'Alex', lastName: 'Beispiel' },
   pickupEta: '2026-10-15T16:05:00Z',
+  availableSeats: 2,
+  estimatedPriceInCents: 0,
+  requiresPayment: false,
+  compensationMode: 'FREE',
 }];
 const config: AppConfig = {
   apiKey: key, issuer: 'https://auth.example', clientId: 'client', audience: 'https://staging.example',
@@ -36,6 +40,21 @@ const openPlzMunicipalities = {
 } as const;
 
 function openPlzResponse(url: URL): Response {
+  if (url.pathname.endsWith('/Localities') && url.searchParams.has('name')) {
+    const body = ['Nord', 'Süd'].map((suffix, index) => ({
+      key: `city-first-${index}`,
+      name: `Musterstadt ${suffix}`,
+      postalCode: index === 0 ? '1111' : '2222',
+      municipality: {
+        key: `municipality-${index}`, code: `1000${index}`, name: `Musterstadt ${suffix}`, status: 'Stadt',
+      },
+      district: { key: '100', code: '100', name: 'Musterdistrikt' },
+      federalProvince: { key: '1', name: 'Burgenland' },
+    }));
+    return Response.json(body, { headers: {
+      'x-page': '1', 'x-page-size': '50', 'x-total-count': '2', 'x-total-pages': '1',
+    } });
+  }
   const postcode = url.searchParams.get('postalCode') as keyof typeof openPlzMunicipalities;
   const municipality = openPlzMunicipalities[postcode];
   const localityName = postcode === '4020' ? 'Linz' : 'Wien, Landstraße';
@@ -296,74 +315,128 @@ test('trip join requires a string ID from a recent completed search', async (t) 
   assert.equal(writes(), 0);
 });
 
-test('voice routes collect independent addresses, reject stale choices, search rides and reuse booking', async (t) => {
-  const { app, writes, addressGeocodes } = await fixture(t);
+test('guided voice routes use session-backed selections from address lookup through booking', async (t) => {
+  const { app, writes, joinedPayloads, addressGeocodes } = await fixture(t);
   await signIn(app);
   const server = app.getHttpServer();
   const headers = { Authorization: authorization };
   const sessionId = 'fonio-call-123';
 
-  const originPostcode = await request(server)
+  const invalidShape = await request(server)
     .post('/api/voice/postcodes/search').set(headers)
-    .send({ sessionId, side: 'origin', postcode: ' 1030 ' }).expect(200);
-  assert.equal(originPostcode.body.data.postcode, '1030');
-  assert.equal(originPostcode.body.status, 'RESOLVED');
-  assert.equal(originPostcode.body.data.city, 'Wien');
+    .send({ sessionId, side: 'origin', postcode: '1030' }).expect(400);
+  assert.equal(invalidShape.body.error.code, 'invalid_request');
 
-  const staleOriginAddress = await request(server)
-    .post('/api/voice/addresses/search').set(headers)
-    .send({ sessionId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
-  assert.equal(addressGeocodes(), 0, 'OpenPLZ discovery must not call Mapbox');
-  await request(server)
+  const cityFirst = await request(server)
+    .post('/api/voice/cities/search').set(headers)
+    .send({ sessionId, from: { postcode: '', city: 'Musterstadt' } }).expect(200);
+  assert.equal(cityFirst.body.status, 'needs_selection');
+  assert.equal(cityFirst.body.candidates.length, 2);
+  assert.deepEqual(cityFirst.body.candidates.map((candidate: { option: string }) => candidate.option), ['A', 'B']);
+  const chosenCity = cityFirst.body.candidates[1] as { postcode: string; city: string };
+  assert.equal('candidateId' in cityFirst.body.candidates[1], false);
+  const selectedCity = await request(server)
+    .post('/api/voice/cities/confirm').set(headers)
+    .send({
+      sessionId,
+      from: { postcode: '', city: 'Musterstadt' },
+      option: 'B',
+      confirmed: true,
+      reply: 'Option B',
+    }).expect(200);
+  assert.deepEqual(selectedCity.body.accepted, { from: { postcode: chosenCity.postcode, city: chosenCity.city } });
+  const invalidCandidate = await request(server)
+    .post('/api/voice/cities/confirm').set(headers)
+    .send({
+      sessionId,
+      from: { postcode: '', city: 'Musterstadt' },
+      option: 'C',
+      confirmed: true,
+      reply: 'Option A',
+    }).expect(409);
+  assert.equal(invalidCandidate.body.error.code, 'context_mismatch');
+
+  const fromPostcode = await request(server)
     .post('/api/voice/postcodes/search').set(headers)
-    .send({ sessionId, side: 'origin', postcode: '1030' }).expect(200);
-  await request(server)
-    .post('/api/voice/addresses/confirm').set(headers)
-    .send({ sessionId, side: 'origin', candidateId: staleOriginAddress.body.candidates[0].id })
-    .expect(200, {
-      status: 'INVALID_CONTEXT', sessionId, side: 'origin',
-      clarificationQuestion: 'That candidate is invalid or stale. Search again before selecting an option.',
-    });
-  const originAddress = await request(server)
+    .send({ sessionId, from: { postcode: ' 1030 ' } }).expect(200);
+  assert.equal(fromPostcode.body.status, 'accepted');
+  assert.deepEqual(fromPostcode.body.accepted, { from: { postcode: '1030' } });
+  assert.equal(fromPostcode.body.selectionMethod, 'direct_input');
+
+  const fromCity = await request(server)
+    .post('/api/voice/cities/search').set(headers)
+    .send({ sessionId, from: { postcode: '1030', city: 'Vienna' } }).expect(200);
+  assert.equal(fromCity.body.status, 'accepted');
+  assert.deepEqual(fromCity.body.accepted, { from: { postcode: '1030', city: 'Wien' } });
+
+  const fromAddress = await request(server)
     .post('/api/voice/addresses/search').set(headers)
-    .send({ sessionId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
-  await request(server)
-    .post('/api/voice/addresses/confirm').set(headers)
-    .send({ sessionId, side: 'origin', candidateId: originAddress.body.candidates[0].id }).expect(200);
+    .send({ sessionId, from: {
+      postcode: '1030', city: 'Wien', street: 'Landstraßer Hauptstraße', houseNumber: '12',
+    } }).expect(200);
+  assert.equal(fromAddress.body.status, 'accepted');
   assert.equal(addressGeocodes(), 1);
-
-  const unresolved = await request(server)
-    .post('/api/voice/rides/search').set(headers)
-    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
-  assert.deepEqual(unresolved.body.data.unresolved, ['destination']);
+  const from = fromAddress.body.accepted.from as Record<string, unknown>;
+  assert.equal(from.longitude, 16.39);
+  assert.equal(from.latitude, 48.197);
 
   const destinationPostcode = await request(server)
     .post('/api/voice/postcodes/search').set(headers)
-    .send({ sessionId, side: 'destination', postcode: '4020' }).expect(200);
-  assert.equal(destinationPostcode.body.data.city, 'Linz');
+    .send({ sessionId, destination: { postcode: '4020' } }).expect(200);
+  assert.deepEqual(destinationPostcode.body.accepted, { destination: { postcode: '4020' } });
+  const destinationCity = await request(server)
+    .post('/api/voice/cities/search').set(headers)
+    .send({ sessionId, destination: { postcode: '4020', city: 'Linz' } }).expect(200);
+  assert.deepEqual(destinationCity.body.accepted, { destination: { postcode: '4020', city: 'Linz' } });
   const destinationAddress = await request(server)
     .post('/api/voice/addresses/search').set(headers)
-    .send({ sessionId, side: 'destination', street: 'Hauptplatz', houseNumber: '1' }).expect(200);
-  assert.equal(addressGeocodes(), 1);
-  await request(server)
-    .post('/api/voice/addresses/confirm').set(headers)
-    .send({ sessionId, side: 'destination', candidateId: destinationAddress.body.candidates[0].id }).expect(200);
+    .send({ sessionId, destination: {
+      postcode: '4020', city: 'Linz', street: 'Hauptplatz', houseNumber: '1',
+    } }).expect(200);
   assert.equal(addressGeocodes(), 2);
+  const destination = destinationAddress.body.accepted.destination as Record<string, unknown>;
+
+  const trip = {
+    sessionId,
+    from,
+    destination,
+    time: '2026-10-20T09:00:00+02:00',
+    seatsRequested: 2,
+  };
 
   const ride = await request(server)
     .post('/api/voice/rides/search').set(headers)
-    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
-  assert.equal(ride.body.status, 'RESOLVED');
-  assert.equal(ride.body.data.rideDetails.rideId, 'ride-1');
-  await request(server).post('/ride/join').set(headers).send({ rideId: 'ride-1' }).expect(200);
+    .send(trip).expect(200);
+  assert.equal(ride.body.status, 'ride_proposed');
+  assert.equal(ride.body.proposals.length, 1);
+  assert.equal(ride.body.proposals[0].option, 'A');
+  assert.equal('rideId' in ride.body.proposals[0], false);
+  assert.equal(ride.body.proposals[0].pickupTime, '2026-10-15T16:05:00Z');
+  assert.equal(ride.body.proposals[0].driverDepartureTime, '2026-10-15T16:00:00Z');
+  assert.equal(ride.body.proposals[0].estimatedPriceInCents, 0);
+  assert.equal(ride.body.proposals[0].requiresPayment, false);
+  assert.equal(ride.body.proposals[0].compensationMode, 'FREE');
+  await request(server).post('/ride/join').set(headers).send({
+    sessionId, option: 'A', confirmed: false, reply: 'Nein',
+  }).expect(200, {
+    sessionId, status: 'declined', message: 'Okay, ich habe keine Buchungsanfrage gesendet.',
+  });
+  assert.equal(writes(), 0);
+
+  const mismatch = await request(server).post('/ride/join').set(headers).send({
+    sessionId, option: 'B', confirmed: true, reply: 'Ja',
+  }).expect(409);
+  assert.equal(mismatch.body.error.code, 'context_mismatch');
+
+  const booking = await request(server).post('/ride/join').set(headers).send({
+    sessionId, option: 'A', confirmed: true, reply: 'Ja, bitte',
+  }).expect(200);
+  assert.equal(booking.body.status, 'booking_pending');
   assert.equal(writes(), 1);
+  assert.equal(joinedPayloads()[0]?.seatsRequested, 2);
 
   await request(server)
     .post('/api/voice/sessions/end').set(headers).send({ sessionId }).expect(200, {
       status: 'RESOLVED', sessionId, data: { deleted: true },
     });
-  const expired = await request(server)
-    .post('/api/voice/rides/search').set(headers)
-    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
-  assert.equal(expired.body.status, 'INVALID_CONTEXT');
 });

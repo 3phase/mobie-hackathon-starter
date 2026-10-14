@@ -1,4 +1,5 @@
 import { ValidationPipe } from '@nestjs/common';
+import type { ValidationError } from 'class-validator';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import express from 'express';
@@ -7,6 +8,16 @@ import { AppModule } from './app.module.js';
 import { HttpError } from './common/errors/http.error.js';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter.js';
 import { applySecurityHeaders } from './common/middleware/security-headers.middleware.js';
+import { guidedError, isGuidedRoute } from './voice/guided-error.js';
+
+function validationMessage(errors: ValidationError[]): string | undefined {
+  for (const error of errors) {
+    if (error.constraints) return Object.values(error.constraints)[0];
+    const nested = validationMessage(error.children ?? []);
+    if (nested) return nested;
+  }
+  return undefined;
+}
 
 export function configureApplication(app: NestExpressApplication): NestExpressApplication {
   app.use(express.json({ limit: 16_384, strict: false }));
@@ -14,12 +25,14 @@ export function configureApplication(app: NestExpressApplication): NestExpressAp
     const parserError = error as { type?: unknown; status?: unknown };
     if (parserError.type === 'entity.too.large' || parserError.status === 413) {
       applySecurityHeaders(response);
-      response.status(413).json({ error: 'JSON body is too large (maximum 16 KiB).' });
+      const message = 'JSON body is too large (maximum 16 KiB).';
+      response.status(413).json(isGuidedRoute(_request.originalUrl) ? guidedError(413, message) : { error: message });
       return;
     }
     if (parserError.type === 'entity.parse.failed') {
       applySecurityHeaders(response);
-      response.status(400).json({ error: 'Request body must be valid JSON.' });
+      const message = 'Request body must be valid JSON.';
+      response.status(400).json(isGuidedRoute(_request.originalUrl) ? guidedError(400, message) : { error: message });
       return;
     }
     next(error);
@@ -31,8 +44,7 @@ export function configureApplication(app: NestExpressApplication): NestExpressAp
       forbidUnknownValues: false,
       stopAtFirstError: true,
       exceptionFactory: (errors) => {
-        const first = errors[0];
-        const message = first?.constraints ? Object.values(first.constraints)[0] : undefined;
+        const message = validationMessage(errors);
         return new HttpError(400, message ?? 'Request validation failed.');
       },
     }),

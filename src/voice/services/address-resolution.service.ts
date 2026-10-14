@@ -62,6 +62,22 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function withoutTrailingHouseNumber(street: string, houseNumber: string): string {
+  const normalizedStreet = normalizeAustrianAddress(street);
+  const normalizedHouseNumber = normalizeAustrianAddress(houseNumber);
+  const suffix = ` ${normalizedHouseNumber}`;
+  return normalizedHouseNumber && normalizedStreet.endsWith(suffix)
+    ? normalizedStreet.slice(0, -suffix.length)
+    : normalizedStreet;
+}
+
+function hasTrailingHouseNumber(value: string | undefined, houseNumber: string): boolean {
+  if (!value) return false;
+  const normalizedValue = normalizeAustrianAddress(value);
+  const normalizedHouseNumber = normalizeAustrianAddress(houseNumber);
+  return normalizedHouseNumber.length > 0 && normalizedValue.endsWith(` ${normalizedHouseNumber}`);
+}
+
 @Injectable()
 export class AddressResolutionService {
   private readonly logger = new Logger(AddressResolutionService.name);
@@ -107,10 +123,16 @@ export class AddressResolutionService {
   }
 
   public async searchAddress(address: AddressState): Promise<AddressCandidate[]> {
-    if (!address.postcode || !address.street) return [];
+    if (!address.street || !address.city) return [];
     const startedAt = Date.now();
-    const data = await this.cache.get(address.postcode);
-    const pool = data.streets.filter((street) => street.postalCode === address.postcode)
+    const streets = address.postcode
+      ? (await this.cache.get(address.postcode)).streets
+      : await this.openPlz.searchStreets(`^${escapeRegex(address.street)}`);
+    const city = normalizeAustrianAddress(address.city);
+    const pool = streets
+      .filter((street) => !address.postcode || street.postalCode === address.postcode)
+      .filter((street) => textSimilarity(city, street.municipality.name) >= 0.86
+        || textSimilarity(city, street.locality) >= 0.86)
       .filter((street) => !address.municipalityKey || street.municipality.key === address.municipalityKey)
       .filter((street) => !address.locality || normalizeAustrianAddress(street.locality) === normalizeAustrianAddress(address.locality));
     const ranked = this.streetMatcher.rank(address.street, pool);
@@ -134,6 +156,9 @@ export class AddressResolutionService {
         ...selected,
         id: candidateId('geocode', candidate.externalId ?? candidate.addressLine, street, address.houseNumber!, postcode),
         displayName: candidate.addressLine,
+        publicName: candidate.publicName,
+        addressLine: candidate.addressLine,
+        houseNumber: candidate.houseNumber ?? address.houseNumber!,
         latitude: candidate.latitude,
         longitude: candidate.longitude,
         ...(candidate.externalId ? { externalId: candidate.externalId } : {}),
@@ -142,8 +167,14 @@ export class AddressResolutionService {
 
   private validFinalCandidate(candidate: LocationCandidate, street: string, houseNumber: string, postcode: string): boolean {
     if (candidate.featureType !== 'address' || candidate.postcode !== postcode) return false;
-    if (!candidate.street || textSimilarity(candidate.street, street) < 0.9) return false;
-    if (!candidate.houseNumber || normalizeAustrianAddress(candidate.houseNumber) !== normalizeAustrianAddress(houseNumber)) return false;
+    const addressLine = candidate.addressLine.split(',')[0];
+    if (candidate.houseNumber) {
+      if (normalizeAustrianAddress(candidate.houseNumber) !== normalizeAustrianAddress(houseNumber)) return false;
+    } else if (!hasTrailingHouseNumber(candidate.street, houseNumber)
+      && !hasTrailingHouseNumber(addressLine, houseNumber)) return false;
+    if (!candidate.street
+      || (textSimilarity(candidate.street, street) < 0.9
+        && textSimilarity(withoutTrailingHouseNumber(candidate.street, houseNumber), street) < 0.9)) return false;
     const match = candidate.matchCode;
     if (match && ['address_number', 'street', 'postcode'].some((key) => match[key] === 'unmatched')) return false;
     return candidate.latitude >= -90 && candidate.latitude <= 90

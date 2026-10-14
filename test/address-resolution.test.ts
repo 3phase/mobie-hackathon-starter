@@ -24,7 +24,10 @@ function street(key: string, name: string, municipality = wien): StreetEntry {
 function service(data: () => PostcodeData, mapboxCandidates: unknown[] = []) {
   let mapboxCalls = 0;
   const cache = { get: async () => data() } as unknown as PostcodeCacheService;
-  const openPlz = { searchLocalities: async () => data().localities } as unknown as OpenPlzService;
+  const openPlz = {
+    searchLocalities: async () => data().localities,
+    searchStreets: async () => data().streets,
+  } as unknown as OpenPlzService;
   const mapbox = {
     geocodeAddress: async () => {
       mapboxCalls += 1;
@@ -92,6 +95,21 @@ test('street resolution filters by postcode and municipality, keeps distinct sha
   assert.deepEqual(missing, []);
 });
 
+test('street resolution supports city-first lookup when postcode is unknown', async () => {
+  const data: PostcodeData = {
+    postcode: '1030', fetchedAt: 1, localities: [locality('l1', 'Wien, Landstraße')],
+    streets: [street('s1', 'Landstraßer Hauptstraße')],
+  };
+  const fixture = service(() => data);
+  const candidates = await fixture.resolution.searchAddress({
+    city: 'Wien', street: 'Landstrasser Hauptstrase', houseNumber: '12', status: 'COLLECTING', candidates: [],
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.postcode, '1030');
+  assert.equal(candidates[0]?.city, 'Wien');
+  assert.equal(fixture.mapboxCalls(), 0);
+});
+
 test('final geocoding accepts only address-level results consistent with street, postcode and house number', async () => {
   const selected = {
     id: 'street', displayName: 'Landstraßer Hauptstraße, 1030 Wien', kind: 'ADDRESS' as const,
@@ -116,4 +134,25 @@ test('final geocoding accepts only address-level results consistent with street,
   assert.equal(results.length, 1);
   assert.equal(results[0]?.latitude, 48.2);
   assert.equal(fixture.mapboxCalls(), 1);
+});
+
+test('final geocoding ignores a duplicated house number at the end of the candidate street', async () => {
+  const selected = {
+    id: 'street', displayName: 'Rainerstraße, 4020 Linz', kind: 'ADDRESS' as const,
+    street: 'Rainerstraße', streetKey: 's1', postcode: '4020', city: 'Linz', municipalityKey: '40101',
+  };
+  const fixture = service(() => ({ postcode: '4020', fetchedAt: 1, localities: [], streets: [] }), [{
+    publicName: 'Rainerstraße 1', addressLine: 'Rainerstraße 1, 4020 Linz',
+    longitude: 14.29, latitude: 48.3, externalId: 'address.1', featureType: 'address',
+    postcode: '4020', city: 'Linz', street: 'Rainerstraße 1',
+    matchCode: { address_number: 'exact', street: 'exact', postcode: 'exact' },
+  }]);
+
+  const results = await fixture.resolution.geocodeAddress({
+    postcode: '4020', city: 'Linz', street: 'Rainerstraße', houseNumber: '1',
+    status: 'NEEDS_CONFIRMATION', candidates: [selected],
+  }, selected);
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.addressLine, 'Rainerstraße 1, 4020 Linz');
 });

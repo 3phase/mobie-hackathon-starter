@@ -1,6 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { HttpError } from '../errors/http.error.js';
+import { guidedError, isGuidedRoute } from '../../voice/guided-error.js';
 
 interface BodyParserError extends Error {
   readonly type?: string;
@@ -26,7 +27,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
         );
       }
     }
-    if (!response.headersSent) response.status(status).json({ error: message });
+    if (!response.headersSent) {
+      response.status(status).json(isGuidedRoute(request.originalUrl) ? guidedError(status, message) : { error: message });
+    }
   }
 
   private describe(exception: unknown): { status: number; message: string } {

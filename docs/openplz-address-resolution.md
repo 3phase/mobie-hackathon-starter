@@ -9,6 +9,7 @@ The integration calls:
 - `GET /at/Localities?postalCode=…` for postcode, municipality, and locality data.
 - `GET /at/Localities?name=…` for bounded city searches when no postcode has been collected.
 - `GET /at/Streets?postalCode=…` for the complete street pool of one postcode.
+- `GET /at/Streets?name=…` for bounded city-first street searches when the postcode is unknown.
 
 Every request explicitly sends `page=1&pageSize=50`. The client requires numeric `x-page`, `x-page-size`, `x-total-count`, and `x-total-pages` headers, checks their internal consistency and item counts, and fetches every remaining page with at most three requests in flight. A missing, failed, or inconsistent page fails the entire load. Transient HTTP/network failures receive the configured bounded retry count; incomplete results are never returned or cached.
 
@@ -16,7 +17,7 @@ OpenPLZ's prepared data is licensed under the [ODC Open Database License (ODbL)]
 
 ## Shared cache
 
-`PostcodeCacheService` stores fully loaded locality and street datasets in process memory. It is shared across calls, independent of the 45-minute call-session store, and never preloads nationwide data. Concurrent cold loads for the same postcode share one promise. Failed loads are removed from the in-flight map and are not cached. The bounded map uses least-recently-used ordering.
+`PostcodeCacheService` stores fully loaded locality and street datasets in process memory. It is shared across requests and never stores Fonio conversation state or preloads nationwide data. Concurrent cold loads for the same postcode share one promise. Failed loads are removed from the in-flight map and are not cached. The bounded map uses least-recently-used ordering.
 
 | Setting | Default | Purpose |
 | --- | ---: | --- |
@@ -36,7 +37,7 @@ Street ranking combines normalized Levenshtein similarity (65%), trigram Dice si
 
 ## Mapbox handoff
 
-Postcode, city, and street search never call Mapbox. After Fonio selects a real OpenPLZ street and a house number is present, `/api/voice/addresses/confirm` submits `address_number`, canonical `street`, `postcode`, and canonical municipality as structured Mapbox Geocoding v6 fields. Coordinates are accepted only from an `address` feature whose postcode, street, and house number agree with the selected structure and whose component match codes do not report an unmatched required component. Street-level fallback coordinates are rejected. Ride search still requires both call-session addresses to be in the final confirmed state with coordinates.
+Postcode and city search never call Mapbox. `/api/voice/addresses/search` discovers real OpenPLZ streets and then submits the supplied house number, canonical street, postcode, and municipality as structured Mapbox Geocoding v6 fields. Coordinates are accepted only from an `address` feature whose postcode, street, and house number agree with the selected structure and whose component match codes do not report an unmatched required component. Street-level fallback coordinates are rejected. A unique result is returned under `accepted`; multiple results are labelled A/B/C and `/api/voice/addresses/confirm` resolves the selected letter against the current session.
 
 Known limitations:
 
@@ -52,19 +53,19 @@ All examples require `Authorization: Bearer $STARTER_API_KEY` and `Content-Type:
 ```bash
 curl -X POST http://localhost:3000/api/voice/postcodes/search \
   -H "Authorization: Bearer $STARTER_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"sessionId":"manual-1","side":"origin","postcode":"1030"}'
+  -d '{"sessionId":"manual-1","from":{"postcode":"1030"}}'
 
 curl -X POST http://localhost:3000/api/voice/cities/search \
   -H "Authorization: Bearer $STARTER_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"sessionId":"manual-1","side":"origin","city":"Vienna"}'
+  -d '{"sessionId":"manual-1","from":{"postcode":"1030","city":"Vienna"}}'
 
 curl -X POST http://localhost:3000/api/voice/addresses/search \
   -H "Authorization: Bearer $STARTER_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"sessionId":"manual-1","side":"origin","street":"Landstrasser Hauptstrase","houseNumber":"12"}'
+  -d '{"sessionId":"manual-1","from":{"postcode":"1030","city":"Wien","street":"Landstrasser Hauptstrase","houseNumber":"12"}}'
 
 curl -X POST http://localhost:3000/api/voice/addresses/confirm \
   -H "Authorization: Bearer $STARTER_API_KEY" -H 'Content-Type: application/json' \
-  -d '{"sessionId":"manual-1","side":"origin","candidateId":"ID_FROM_SEARCH"}'
+  -d '{"sessionId":"manual-1","from":{"postcode":"1030","city":"Wien","street":"Landstrasser Hauptstrase","houseNumber":"12"},"option":"A","confirmed":true,"reply":"Option A"}'
 ```
 
-Use `/api/voice/cities/confirm` in the same way when a city lookup returns multiple candidates. An unambiguous postcode or high-confidence city can be applied automatically, in which case no city candidate ID is returned.
+Use `/api/voice/cities/confirm` in the same way when a city lookup returns multiple candidates. Requests use exactly one of `from` or `destination`; unique city/address results are accepted automatically and therefore need no option-selection call.

@@ -1,9 +1,16 @@
-import { IsString, Matches, MaxLength } from 'class-validator';
-import { SidedVoiceRequestDto } from './voice-request.dto.js';
+import { IsBoolean, IsString, Matches, MaxLength } from 'class-validator';
+import { CitySearchDto } from './city-search.dto.js';
 
-export class CityConfirmDto extends SidedVoiceRequestDto {
-  @IsString({ message: 'candidateId must be a non-empty string.' })
-  @Matches(/\S/, { message: 'candidateId must be a non-empty string.' })
-  @MaxLength(128, { message: 'candidateId must be at most 128 characters.' })
-  public candidateId!: string;
+export class CityConfirmDto extends CitySearchDto {
+  @IsString({ message: 'option muss A, B oder C sein.' })
+  @Matches(/^[ABC]$/, { message: 'option muss A, B oder C sein.' })
+  public option!: string;
+
+  @IsBoolean({ message: 'confirmed muss ein boolescher Wert sein.' })
+  public confirmed!: boolean;
+
+  @IsString({ message: 'reply muss eine nicht leere Zeichenfolge mit höchstens 256 Zeichen sein.' })
+  @Matches(/\S/, { message: 'reply muss eine nicht leere Zeichenfolge mit höchstens 256 Zeichen sein.' })
+  @MaxLength(256, { message: 'reply muss eine nicht leere Zeichenfolge mit höchstens 256 Zeichen sein.' })
+  public reply!: string;
 }

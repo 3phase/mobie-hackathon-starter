@@ -118,6 +118,11 @@ export class OpenPlzService {
     return values.map(locality);
   }
 
+  public async searchStreets(name: string): Promise<StreetEntry[]> {
+    const values = await this.fetchAllPages<unknown>('/at/Streets', { name }, 250);
+    return values.map(street);
+  }
+
   public async fetchAllPages<T>(
     endpoint: string,
     params: Record<string, string>,

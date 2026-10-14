@@ -42,7 +42,7 @@ export class InMemoryCallSessionStore implements CallSessionStore {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly ttlMs = CALL_SESSION_TTL_MS;
 
-  public constructor(@Inject(CLOCK) private readonly now: Clock = Date.now) { }
+  public constructor(@Inject(CLOCK) private readonly now: Clock) {}
 
   public get(sessionId: string): CallSession | undefined {
     const id = this.sessionId(sessionId);
@@ -64,6 +64,7 @@ export class InMemoryCallSessionStore implements CallSessionStore {
       sessionId: id,
       origin: initialAddress(),
       destination: initialAddress(),
+      rideProposals: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -109,7 +110,7 @@ export class InMemoryCallSessionStore implements CallSessionStore {
       };
     }
     const next: AddressState = changed ? collectingAddress(source, partialAddress) : { ...current, ...partialAddress };
-    return this.save({ ...session, [side]: next });
+    return this.save({ ...session, [side]: next, ...(changed ? { rideProposals: [] } : {}) });
   }
 
   public confirmCandidate(sessionId: string, side: AddressSide, candidateId: string): CallSession {
@@ -129,7 +130,7 @@ export class InMemoryCallSessionStore implements CallSessionStore {
         status: 'COLLECTING',
         candidates: [],
       });
-      return this.save({ ...session, [side]: next });
+      return this.save({ ...session, [side]: next, rideProposals: [] });
     }
 
     if (candidate.latitude === undefined || candidate.longitude === undefined) {
@@ -137,6 +138,8 @@ export class InMemoryCallSessionStore implements CallSessionStore {
     }
     const resolvedLocation: ResolvedLocation = {
       displayName: candidate.displayName,
+      publicName: candidate.publicName ?? candidate.displayName,
+      addressLine: candidate.addressLine ?? candidate.displayName,
       latitude: candidate.latitude,
       longitude: candidate.longitude,
       ...(candidate.externalId ? { externalId: candidate.externalId } : {}),
@@ -146,6 +149,7 @@ export class InMemoryCallSessionStore implements CallSessionStore {
       ...(candidate.city ? { city: candidate.city } : {}),
       ...(candidate.postcode ? { postcode: candidate.postcode } : {}),
       ...(candidate.street ? { street: candidate.street } : {}),
+      ...(candidate.houseNumber ? { houseNumber: candidate.houseNumber } : {}),
       ...(candidate.locality ? { locality: candidate.locality } : {}),
       ...(candidate.municipalityKey ? { municipalityKey: candidate.municipalityKey } : {}),
       ...(candidate.localityKey ? { localityKey: candidate.localityKey } : {}),
@@ -154,7 +158,7 @@ export class InMemoryCallSessionStore implements CallSessionStore {
       candidates: [],
       resolvedLocation,
     };
-    return this.save({ ...session, [side]: next });
+    return this.save({ ...session, [side]: next, rideProposals: [] });
   }
 
   public async runExclusive<T>(sessionId: string, operation: () => Promise<T> | T): Promise<T> {
@@ -175,8 +179,8 @@ export class InMemoryCallSessionStore implements CallSessionStore {
 
   private sessionId(value: string): string {
     const normalized = value.trim();
-    if (!normalized || normalized.length > 256) {
-      throw new HttpError(400, 'sessionId must be a non-empty string of at most 256 characters.');
+    if (!normalized || normalized.length > 2048) {
+      throw new HttpError(400, 'sessionId must be a non-empty string of at most 2048 characters.');
     }
     return normalized;
   }

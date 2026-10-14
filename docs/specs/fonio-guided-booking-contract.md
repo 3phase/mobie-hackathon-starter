@@ -1,8 +1,8 @@
 # Fonio guided booking: overview, assistant setup and API reference
 
-Status: **proposed contract, not implemented**. Updated 14 October 2026.
+Status: **backend contract implemented; live Fonio response chaining still requires verification**. Updated 14 October 2026.
 
-This design uses explicit departure/destination variables in Fonio. Requests carry their required context; each body also carries `sessionId` as a call-correlation reference. There is no session-creation endpoint or `addressRole` field, and no stored conversation is required. The existing `POST /api/addresses/receive-trip` remains a separate receipt-only test.
+This design uses explicit departure/destination variables in Fonio. Every request carries `sessionId`, which identifies a short-lived in-memory call session in the app. There is no session-creation endpoint or `addressRole` field; the first lookup creates the session automatically. The existing `POST /api/addresses/receive-trip` remains a separate receipt-only test.
 
 - [1. Overview](#1-overview)
 - [2. Fonio setup: general prompt and shared settings](#2-fonio-setup-general-prompt-and-shared-settings)
@@ -42,7 +42,7 @@ sequenceDiagram
             Fonio-->>Caller: Short Option A, B and C if present
             Note over Caller,Fonio: Repeat a requested option without a new search or changing its letter
             Caller->>Fonio: Choose a city option by letter or unambiguous description
-            Fonio->>App: POST /api/voice/cities/confirm with query context and chosen candidateToken
+            Fonio->>App: POST /api/voice/cities/confirm with query context and chosen letter
             App-->>Fonio: Accepted city and postcode if determinable
         end
         Note over Caller,App: Zero matches or unclear selection repeat the affected step without advancing
@@ -57,7 +57,7 @@ sequenceDiagram
             Fonio-->>Caller: Short Option A, B and C if present
             Caller->>Fonio: Choose or ask to repeat an option
             Note over Fonio: On repeat, read only the requested option and wait for a choice
-            Fonio->>App: POST /api/voice/addresses/confirm after clear choice with original context and token
+            Fonio->>App: POST /api/voice/addresses/confirm after clear choice with original context and chosen letter
             App-->>Fonio: Accepted full address and coordinates
         end
         Note over Fonio: Retain accepted canonical values. A unique match needs no confirmation question
@@ -69,7 +69,7 @@ sequenceDiagram
     end
     Fonio->>App: POST /api/voice/rides/search with both resolved addresses, time and count
     alt One to three rides found
-        App-->>Fonio: Ride proposals with short labels, full summaries and proposalToken
+        App-->>Fonio: Ride proposals with short labels and full summaries
         opt Two or three rides
             Fonio-->>Caller: A/B/C with distinguishing pickup time or location
             Caller->>Fonio: Choose a ride or ask for an option to be repeated
@@ -81,7 +81,7 @@ sequenceDiagram
             Note over Fonio,App: No join call. Clear dependent accepted values and consent, retain other raw inputs, revalidate and search again
             Fonio-->>Caller: Acknowledge the correction and ask only if information is missing or ambiguous
         else Clear consent or refusal
-            Fonio->>App: POST /ride/join with full current trip, proposalToken and answer
+            Fonio->>App: POST /ride/join with sessionId, selected option letter and answer
             alt Explicit consent
                 App-->>Fonio: booking_pending
                 Fonio-->>Caller: Request sent and awaiting driver approval
@@ -120,31 +120,27 @@ Start and destination are validated in that order, but details volunteered for e
 
 ### 1.3 Where the information lives
 
-Fonio retains explicit values such as `from_postcode`, `from_city`, `from_street`, `from_house_number`, their destination equivalents, `travel_time` and `passenger_count`. Raw input variables are separate from canonical values returned by our app. Coordinates and candidate/proposal tokens are copied exactly from responses.
+Fonio retains explicit values such as `from_postcode`, `from_city`, `from_street`, `from_house_number`, their destination equivalents, `travel_time` and `passenger_count`. Raw input variables are separate from canonical values returned by our app. Coordinates are copied exactly from responses; for a multiple-choice result, Fonio sends the caller's selected A/B/C letter back to the app.
 
-Each address request contains exactly one `from` or `destination` object. This replaces a generic addressRole field. The URL and populated object identify the operation; a request containing both objects on an address endpoint is invalid. Ride search and booking confirmation require both objects.
+Each address request contains exactly one `from` or `destination` object. This replaces a generic addressRole field. The URL and populated object identify the operation; a request containing both objects on an address endpoint is invalid. Ride search requires both objects. Booking confirmation needs the selected ride option letter and the caller's answer.
 
-The app must not rely on a global “current caller” or “current trip”. It validates the context supplied with each request. This approach can also isolate concurrent callers as long as Fonio keeps each conversation's variables separate. The sessionId now links HTTP requests from the same call for tracing. It does not replace explicit address context or create a persistent conversation.
+The app keeps one isolated in-memory session per `sessionId`. It stores the current start and destination state, the ordered latest candidates and the ordered latest ride proposals. A new search replaces older candidates/proposals, so A/B/C always refers to the latest result for that session and step. Sessions expire after 45 minutes of inactivity and may be removed explicitly through `POST /api/voice/sessions/end`.
 
-The address/search workflow is **stateless in our app**. Fonio holds the conversation values and sends all required known information on every request. Our app does not retain caller context, address-search records or a current trip between requests.
-
-For selection integrity, this draft uses self-contained, server-signed `candidateToken` and `proposalToken` values. A candidate token carries the original query/context, selected canonical candidate and expiry; a proposal token carries the proposed ride, full passenger trip, passenger identity and expiry. Fonio copies them unchanged. Our app verifies their signature and supplied context without looking up a stored record. These are not session IDs. Signing is proposed development; tokens are integrity-protected, not assumed encrypted, and must not contain unnecessary personal information.
-
-The existing server's Auth0 passenger login still lives in memory; stateless address processing does not remove that authentication requirement. Real ride requests are stored in mobie, as required by the challenge.
+Candidate IDs and ride IDs remain internal to the app's session state. Fonio does not receive or return them: it sends `option: "A"`, `"B"`, or `"C"`, and the app resolves that position against the latest matching search in the same session. The existing Auth0 passenger login also lives in memory. Real ride requests are stored in mobie, as required by the challenge.
 
 ### 1.4 Requests build on known information
 
-Each request is self-contained. The app never assumes that it remembers a previous request. Fonio supplies canonical values already returned by the app, plus the caller's new input.
+Search requests still provide their explicit address/trip fields so their public payloads remain clear and validateable. The app also checks them against the current session state where a later step depends on an earlier one.
 
 | Request | Information Fonio sends |
 | --- | --- |
 | Postcode validation | The new postcode input. |
 | City search | City input and accepted postcode when known; postcode is optional. |
-| City selection, if multiple | The same city query and optional postcode context, plus the chosen signed candidate token and answer. |
+| City selection, if multiple | The same city query and optional postcode context, plus the caller's chosen option letter and answer. |
 | Street/house-number search | Accepted city, street and house-number input, plus postcode if known. |
-| Address selection, if multiple | The same city/street/number and optional-postcode context plus the chosen signed candidate token and answer. |
+| Address selection, if multiple | The same city/street/number and optional-postcode context plus the caller's chosen option letter and answer. |
 | Ride search | Both full accepted addresses with returned coordinates, travel time and passenger count. |
-| Booking consent | The full current trip again, the chosen signed proposal token and explicit consent/refusal. |
+| Booking consent | The sessionId, selected ride option letter and explicit consent/refusal. |
 
 For example, start-city search:
 
@@ -208,7 +204,7 @@ There are **seven app routes** and **twelve Fonio HTTP Request tools**. The five
 | `/api/voice/rides/search` | `mobie_search_ride` |
 | `/ride/join` | `mobie_confirm_booking` |
 
-Our app implements these orchestration routes using the processor and geographic/mobie adapters. Mapbox does not expose these custom routes. They are not live yet.
+Our app implements these orchestration routes using the geographic and mobie adapters. Mapbox does not expose these custom routes. Live Fonio tool configuration and response chaining still need verification.
 
 ## 2. Fonio setup: general prompt and shared settings
 
@@ -226,7 +222,7 @@ Validiere zuerst den Start, danach das Ziel: bekannte Postleitzahl, dann Stadt/G
 Verwende dafür die Werkzeuge mit from im Namen. Wiederhole den Ablauf für das Ziel mit destination im Namen.
 Halte Start- und Zielvariablen strikt getrennt. Jede Anfrage enthält sessionId aus Fonios Systemwert conversationLink zur Zuordnung des Gesprächs. Dieser Wert wird im HTTP-Body eingesetzt, nicht vom Agenten erfunden oder von der anrufenden Person abgefragt. Es gibt keine addressRole im Request.
 Sende in jedem Werkzeug die bereits übernommenen Kontextwerte gemäß dessen Body mit.
-Übernimm kanonische Werte und Koordinaten exakt aus App-Antworten. Erfinde keine Namen, Hausnummern, Koordinaten oder Tokens.
+Übernimm kanonische Werte und Koordinaten exakt aus App-Antworten. Erfinde keine Namen, Hausnummern oder Koordinaten.
 Nach jeder erfolgreichen Antwort mit status accepted kopiere die Felder aus accepted.from in die gleichnamigen from-Variablen und aus accepted.destination in die destination-Variablen.
 Beispiel: accepted.from.city wird from_city, accepted.from.houseNumber wird from_house_number, accepted.from.longitude wird from_longitude.
 Verwende für die nächste Suche die übernommenen Werte unserer App, nicht die ursprüngliche Schreibweise aus den _input-Variablen.
@@ -238,7 +234,7 @@ Postleitzahl: wenn bekannt direkt prüfen und übernehmen, keine Bestätigungsfr
 Stadt oder vollständige Adresse: Bei genau einer Option übernimmt die App sie automatisch. Speichere die Werte und gehe ohne Bestätigungsfrage weiter.
 Bei zwei oder drei Optionen lies „Option A: …, Option B: …, Option C: …“ mit den kurzen spokenLabel-Werten vor. Nenne zuerst nur unterscheidende Orts-, Abholzeit- oder Abholpunktangaben, nicht lange vollständige Beschreibungen.
 Bei „B wiederholen“ lies nur Option B erneut vor. Suche nicht neu und ändere die Buchstaben nicht. Akzeptiere auch eine eindeutige Orts- oder Zeitbeschreibung statt des Buchstabens. Bei unklarer Zuordnung frage nach.
-Frage nach der Auswahl. Sende die eindeutige Wahl mit dem passenden Stadt-/Adress-Auswahlwerkzeug, ohne zusätzliche Ja/Nein-Frage.
+Frage nach der Auswahl. Sende den gewählten Buchstaben A, B oder C mit dem passenden Stadt-/Adress-Auswahlwerkzeug, ohne zusätzliche Ja/Nein-Frage.
 Bei unklarer Wahl frage erneut. Wähle niemals automatisch die erste von mehreren Optionen.
 Bei needs_clarification frage die zurückgegebene Frage und wiederhole die betroffene Suche. Technische Fehler sind keine leeren Suchergebnisse.
 
@@ -256,14 +252,14 @@ Bei booking_pending sage, dass die Anfrage auf Fahrerbestätigung wartet. Bei bo
 Bei Korrekturen lösche abhängige kanonische Werte, Koordinaten, Kandidaten und Fahrtvorschläge, bevor du neu suchst. Bewahre andere bereits genannte Rohangaben zur erneuten Validierung auf und frage sie nicht unnötig erneut ab.
 Korrigierte Postleitzahl: Stadt und vollständige Adresse neu validieren. Korrigierte Stadt: Straße und vollständige Adresse neu validieren. Bei geänderter Hausnummer nur die vollständige Adresse neu prüfen. Bestätige die konkrete Änderung kurz.
 Eine Korrektur während der Buchungsfrage ist keine Buchungszustimmung: nicht join aufrufen, erst neu validieren, Fahrten neu suchen, vollständige Zusammenfassung erneut vorlesen und erneut um Buchungszustimmung bitten.
-Jede Änderung an Adresse, Zeit oder Personenzahl löscht selected_proposal_token und bisherige Buchungszustimmung.
-Verwende ausschließlich Tokens der aktuellen passenden Antwort. Behaupte bei Fehlern keinen sicheren Erfolg.
+Jede Änderung an Adresse, Zeit oder Personenzahl löscht selected_ride_option und bisherige Buchungszustimmung.
+Verwende Optionsbuchstaben ausschließlich für die aktuelle passende Antwort. Behaupte bei Fehlern keinen sicheren Erfolg.
 
 ```
 
 ### 2.2 Shared webhook settings
 
-Start calls manually from Fonio's dev interface. No start-session webhook is needed. Configure the following tools only after the proposed backend routes work; for an immediate transport test, use [the two-address receiver](../packages/fonio-trip-receipt.md).
+Start calls manually from Fonio's dev interface. No start-session webhook is needed. Configure the following tools against the implemented backend routes; for a simpler transport-only comparison, use [the two-address receiver](../packages/fonio-trip-receipt.md).
 
 In the assistant, open **Webhooks → Add new webhook → Add HTTP request**. Use these defaults for all twelve tools:
 
@@ -288,21 +284,21 @@ For booking use the neutral execution sentence `Ich verarbeite deine Antwort.` b
 
 Copy each trigger into **When should the AI use this?**. Response rules belong in the general prompt; use a separate response-instructions field too if available. Disable older competing receipt/lookup tools on this guided test assistant.
 
-Boolean and numeric placeholders are unquoted. Verify that variable substitution produces valid JSON, including quotation marks and umlauts. Use Fonio's variable picker where available. The [official HTTP Request guide](https://fonio.info/en/developers/http-request) documents these settings. It does not establish automatic extraction of response fields into custom variables: test that Fonio copies canonical values, coordinates and tokens correctly between tools. Do not assume an unsupported JSON-import or response-mapping feature.
+Boolean and numeric placeholders are unquoted. Verify that variable substitution produces valid JSON, including quotation marks and umlauts. Use Fonio's variable picker where available. The [official HTTP Request guide](https://fonio.info/en/developers/http-request) documents these settings. It does not establish automatic extraction of response fields into custom variables: test that Fonio copies canonical values and coordinates correctly between tools. Do not assume an unsupported JSON-import or response-mapping feature.
 
 ### 2.3 Updating and clearing variables
 
-Store raw caller input in the relevant `_input` variable. Store app-returned canonical values separately. For an accepted response, copy every field of `accepted.from` or `accepted.destination` into the matching variables. A selected option's token must come from the current candidate list. The letters A/B/C are spoken labels, not tokens.
+Store raw caller input in the relevant `_input` variable. Store app-returned canonical values separately. For an accepted response, copy every field of `accepted.from` or `accepted.destination` into the matching variables. For multiple choices, retain the caller's selected A/B/C letter only for the immediate selection request.
 
 - Postcode correction clears that side's accepted city/address values, coordinates and candidate references. Retain unchanged raw city/street/number input for revalidation; do not ask the caller to repeat it unless needed.
 - City correction clears that side's accepted street/address values, coordinates and candidate references. Retain unchanged raw street/number input for revalidation.
 - Street/house-number correction clears that side's accepted full address, coordinates and address candidate reference. Retain postcode/city context when still valid and revalidate using the corrected raw field.
-- Any address, time or passenger-count change clears ride proposals, selected_proposal_token and booking consent.
+- Any address, time or passenger-count change clears ride proposals, `selected_ride_option` and booking consent.
 - Never reuse another conversation's values or use empty coordinates. Ask only for missing required context. An unknown postcode is optional, not a reason to ask it repeatedly.
 
 ### 2.4 Exact response-to-next-request mapping
 
-**This is a required behavior to configure and verify, not a claim that Fonio performs automatic variable assignment.** The guided tools have not been implemented or tested live. A prompt and a variable description alone do not prove that the actual next HTTP request contains the returned values.
+**This is a required behavior to configure and verify, not a claim that Fonio performs automatic variable assignment.** The guided backend routes are implemented, but the Fonio tools have not been tested live. A prompt and a variable description alone do not prove that the actual next HTTP request contains the returned values.
 
 After `status: "accepted"`, copy canonical fields from the response as follows. Preserve their types. Only fields present in that step's accepted response are updated; fields invalidated by a correction remain empty until resolved again. For an unknown postcode initialise the relevant canonical postcode variable to an empty string. An accepted city/address response returns postcode as a canonical value when known or as an empty string when unknown; never reuse a postcode from an invalidated address.
 
@@ -325,9 +321,9 @@ After `status: "accepted"`, copy canonical fields from the response as follows. 
 | `accepted.destination.longitude` | `destination_longitude` (Number) | Ride search and booking |
 | `accepted.destination.latitude` | `destination_latitude` (Number) | Ride search and booking |
 
-For multiple options, the chosen `candidates[n].candidateToken` is copied to the matching `from_city_candidate_token`, `from_address_candidate_token`, `destination_city_candidate_token` or `destination_address_candidate_token`. Send it with the original search input through the matching selection tool. Copy canonical values only from that tool's subsequent accepted response. For a unique option, the search response itself contains accepted values; no selection call is needed.
+For multiple options, Fonio maps the caller's utterance to the current candidate's `option` value (`A`, `B`, or `C`) and sends that letter with the original search input through the matching selection tool. Copy canonical values only from that tool's subsequent accepted response. For a unique option, the search response itself contains accepted values; no selection call is needed.
 
-The chosen `proposals[n].proposalToken` is copied to `selected_proposal_token`. Copying or choosing that token does **not** set `booking_confirmed`; that boolean comes only from the caller's answer to the separate booking question. Keep `travel_time` and `passenger_count` as the caller's collected requirements unless the caller changes them.
+The chosen `proposals[n].option` is copied to `selected_ride_option`. Choosing that letter does **not** set `booking_confirmed`; that boolean comes only from the caller's answer to the separate booking question. Keep `travel_time` and `passenger_count` as the caller's collected requirements unless the caller changes them.
 
 Example: Fonio initially sends a city input such as `Stei regg`, but the app returns this illustrative accepted response:
 
@@ -373,11 +369,11 @@ In Fonio's Request tab, place the cursor in the sessionId value, click **Add Var
 
 Our field name is `sessionId`; its initial documented source is the **full conversation link**, treated as an opaque string rather than a UUID. Do not parse an ID from an assumed URL format or use the caller's phone number. Confirm it is stable across requests in one call and different between separate calls before relying on it for tracing.
 
-This metadata does not require storing session data in our app. The same request still contains postcode/city/address/trip context. sessionId is not an authentication token or proof of caller identity and does not make booking writes idempotent. It should not be spoken aloud.
+The backend uses this value as the key for its in-memory call session. It is not an authentication token or proof of caller identity and does not make booking writes idempotent. It should not be spoken aloud.
 
 **Dev-interface test:** first inspect whether conversationLink is populated during a browser test. Fonio's [webhook guidance](https://fonio.info/en/setup/webhooks-and-variables) notes that browser tests do not expose all real-call data. Availability of this particular system value in dev tests is not yet verified. If absent, temporarily use a fixed unique value such as `"sessionId": "dev-manual-call-001"` in every tool body for that one test call. Use a new value for the next test and restore the system variable before real calls. Do not let the AI guess an ID or silently reuse a previous call's value.
 
-In the proposed backend, sessionId must be a nonempty string of at most 2048 characters, accepted as correlation metadata without fetching its URL. Echo it in conversational responses. No app-generated session-creation request is needed. On an invalid/missing value, return a validation error; a manual test ID is an explicit dev setup choice, not a backend fallback.
+The backend requires sessionId to be a nonempty string of at most 2048 characters, uses it as an opaque session key without fetching its URL, and echoes it in conversational responses. The first lookup creates the session automatically. On an invalid/missing value, it returns a validation error; a manual test ID is an explicit dev setup choice, not a backend fallback.
 
 ## 3. Fonio setup: individual webhooks
 
@@ -460,7 +456,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
     "postcode": "{{from_postcode}}",
     "city": "{{from_city_input}}"
   },
-  "candidateToken": "{{from_city_candidate_token}}",
+  "option": "{{selection_option}}",
   "confirmed": {{selection_confirmed}},
   "reply": "{{selection_reply}}"
 }
@@ -474,11 +470,11 @@ Each section uses the shared method, timing, authorization and execution sentenc
 | --- | --- | --- |
 | `from_postcode` | String | Geprüfte Start-Postleitzahl aus der App-Antwort, wenn bekannt. Bei unbekannter Postleitzahl leerer String; nicht erfinden oder erneut erzwingen. |
 | `from_city_input` | String | Genannte oder korrigierte Start-Gemeinde, so wie verstanden. |
-| `from_city_candidate_token` | String | candidateToken der gewählten aktuellen Start-Stadtoption. Exakt aus der App-Antwort kopieren, nicht den Buchstaben A/B/C senden. |
+| `selection_option` | String | Buchstabe A, B oder C der eindeutig gewählten aktuellen Option. |
 | `selection_confirmed` | Boolean | true bei eindeutiger Wahl einer aktuellen Stadt-/Adressoption, false bei Ablehnung eines bestimmten Kandidaten. Bei Unklarheit erneut fragen. Keine Buchungszustimmung. |
 | `selection_reply` | String | Die verstandene Antwort zur aktuellen Stadt-/Adressauswahl, z. B. Option B. |
 
-**Response handling:** Send the selected candidate token and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject stale or mismatched references. If all options are rejected, collect corrected input and repeat search without inventing a token.
+**Response handling:** Send the selected A/B/C letter and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject a letter that is absent from the current result or has stale/mismatched context. If all options are rejected, collect corrected input and repeat the search.
 
 ### 3.4 Start — Street and house number
 
@@ -534,7 +530,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
     "street": "{{from_street_input}}",
     "houseNumber": "{{from_house_number_input}}"
   },
-  "candidateToken": "{{from_address_candidate_token}}",
+  "option": "{{selection_option}}",
   "confirmed": {{selection_confirmed}},
   "reply": "{{selection_reply}}"
 }
@@ -550,11 +546,11 @@ Each section uses the shared method, timing, authorization and execution sentenc
 | `from_city` | String | Übernommene Start-Gemeinde exakt aus unserer App-Antwort übernehmen. |
 | `from_street_input` | String | Genannter Start-Straßenname, so wie verstanden. Nicht selbst korrigieren. |
 | `from_house_number_input` | String | Genannte Start-Hausnummer einschließlich Zusatz wie 4a. Nicht erfinden. |
-| `from_address_candidate_token` | String | candidateToken der gewählten aktuellen vollständigen Start-Adressoption. Exakt aus der App-Antwort kopieren. |
+| `selection_option` | String | Buchstabe A, B oder C der eindeutig gewählten aktuellen Option. |
 | `selection_confirmed` | Boolean | true bei eindeutiger Wahl einer aktuellen Stadt-/Adressoption, false bei Ablehnung eines bestimmten Kandidaten. Bei Unklarheit erneut fragen. Keine Buchungszustimmung. |
 | `selection_reply` | String | Die verstandene Antwort zur aktuellen Stadt-/Adressauswahl, z. B. Option B. |
 
-**Response handling:** Send the selected candidate token and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject stale or mismatched references. If all options are rejected, collect corrected input and repeat search without inventing a token.
+**Response handling:** Send the selected A/B/C letter and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject a letter that is absent from the current result or has stale/mismatched context. If all options are rejected, collect corrected input and repeat the search.
 
 ### 3.6 Ziel — Postcode
 
@@ -633,7 +629,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
     "postcode": "{{destination_postcode}}",
     "city": "{{destination_city_input}}"
   },
-  "candidateToken": "{{destination_city_candidate_token}}",
+  "option": "{{selection_option}}",
   "confirmed": {{selection_confirmed}},
   "reply": "{{selection_reply}}"
 }
@@ -647,11 +643,11 @@ Each section uses the shared method, timing, authorization and execution sentenc
 | --- | --- | --- |
 | `destination_postcode` | String | Geprüfte Ziel-Postleitzahl aus der App-Antwort, wenn bekannt. Bei unbekannter Postleitzahl leerer String; nicht erfinden oder erneut erzwingen. |
 | `destination_city_input` | String | Genannte oder korrigierte Ziel-Gemeinde, so wie verstanden. |
-| `destination_city_candidate_token` | String | candidateToken der gewählten aktuellen Ziel-Stadtoption. Exakt aus der App-Antwort kopieren, nicht den Buchstaben A/B/C senden. |
+| `selection_option` | String | Buchstabe A, B oder C der eindeutig gewählten aktuellen Option. |
 | `selection_confirmed` | Boolean | true bei eindeutiger Wahl einer aktuellen Stadt-/Adressoption, false bei Ablehnung eines bestimmten Kandidaten. Bei Unklarheit erneut fragen. Keine Buchungszustimmung. |
 | `selection_reply` | String | Die verstandene Antwort zur aktuellen Stadt-/Adressauswahl, z. B. Option B. |
 
-**Response handling:** Send the selected candidate token and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject stale or mismatched references. If all options are rejected, collect corrected input and repeat search without inventing a token.
+**Response handling:** Send the selected A/B/C letter and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject a letter that is absent from the current result or has stale/mismatched context. If all options are rejected, collect corrected input and repeat the search.
 
 ### 3.9 Ziel — Street and house number
 
@@ -707,7 +703,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
     "street": "{{destination_street_input}}",
     "houseNumber": "{{destination_house_number_input}}"
   },
-  "candidateToken": "{{destination_address_candidate_token}}",
+  "option": "{{selection_option}}",
   "confirmed": {{selection_confirmed}},
   "reply": "{{selection_reply}}"
 }
@@ -723,11 +719,11 @@ Each section uses the shared method, timing, authorization and execution sentenc
 | `destination_city` | String | Übernommene Ziel-Gemeinde exakt aus unserer App-Antwort übernehmen. |
 | `destination_street_input` | String | Genannter Ziel-Straßenname, so wie verstanden. Nicht selbst korrigieren. |
 | `destination_house_number_input` | String | Genannte Ziel-Hausnummer einschließlich Zusatz wie 4a. Nicht erfinden. |
-| `destination_address_candidate_token` | String | candidateToken der gewählten aktuellen vollständigen Ziel-Adressoption. Exakt aus der App-Antwort kopieren. |
+| `selection_option` | String | Buchstabe A, B oder C der eindeutig gewählten aktuellen Option. |
 | `selection_confirmed` | Boolean | true bei eindeutiger Wahl einer aktuellen Stadt-/Adressoption, false bei Ablehnung eines bestimmten Kandidaten. Bei Unklarheit erneut fragen. Keine Buchungszustimmung. |
 | `selection_reply` | String | Die verstandene Antwort zur aktuellen Stadt-/Adressauswahl, z. B. Option B. |
 
-**Response handling:** Send the selected candidate token and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject stale or mismatched references. If all options are rejected, collect corrected input and repeat search without inventing a token.
+**Response handling:** Send the selected A/B/C letter and original search context. The choice needs no further yes/no question. Retain returned accepted values in Fonio. Reject a letter that is absent from the current result or has stale/mismatched context. If all options are rejected, collect corrected input and repeat the search.
 
 ### 3.11 Ride search
 
@@ -807,29 +803,7 @@ Each section uses the shared method, timing, authorization and execution sentenc
 ```json
 {
   "sessionId": "{{conversationLink}}",
-  "from": {
-    "postcode": "{{from_postcode}}",
-    "city": "{{from_city}}",
-    "street": "{{from_street}}",
-    "houseNumber": "{{from_house_number}}",
-    "publicName": "{{from_public_name}}",
-    "addressLine": "{{from_address_line}}",
-    "longitude": {{from_longitude}},
-    "latitude": {{from_latitude}}
-  },
-  "destination": {
-    "postcode": "{{destination_postcode}}",
-    "city": "{{destination_city}}",
-    "street": "{{destination_street}}",
-    "houseNumber": "{{destination_house_number}}",
-    "publicName": "{{destination_public_name}}",
-    "addressLine": "{{destination_address_line}}",
-    "longitude": {{destination_longitude}},
-    "latitude": {{destination_latitude}}
-  },
-  "time": "{{travel_time}}",
-  "seatsRequested": {{passenger_count}},
-  "proposalToken": "{{selected_proposal_token}}",
+  "option": "{{selected_ride_option}}",
   "confirmed": {{booking_confirmed}},
   "reply": "{{booking_reply}}"
 }
@@ -841,41 +815,23 @@ Each section uses the shared method, timing, authorization and execution sentenc
 
 | Variable | Type | Description to enter in Fonio |
 | --- | --- | --- |
-| `from_postcode` | String | Geprüfte Start-Postleitzahl aus der App-Antwort, wenn bekannt. Bei unbekannter Postleitzahl leerer String; nicht erfinden oder erneut erzwingen. |
-| `from_city` | String | Übernommene Start-Gemeinde exakt aus unserer App-Antwort übernehmen. |
-| `from_street` | String | Übernommener Start-Straßenname aus der App-Antwort. |
-| `from_house_number` | String | Übernommene Start-Hausnummer aus der App-Antwort. |
-| `from_public_name` | String | publicName der übernommenen vollständigen Start-Adresse aus der App-Antwort. |
-| `from_address_line` | String | addressLine der übernommenen vollständigen Start-Adresse aus der App-Antwort. |
-| `from_longitude` | Number | longitude der übernommenen Start-Adresse exakt aus unserer App-Antwort. Keine Koordinaten erfinden. |
-| `from_latitude` | Number | latitude der übernommenen Start-Adresse exakt aus unserer App-Antwort. Nicht mit longitude vertauschen. |
-| `destination_postcode` | String | Geprüfte Ziel-Postleitzahl aus der App-Antwort, wenn bekannt. Bei unbekannter Postleitzahl leerer String; nicht erfinden oder erneut erzwingen. |
-| `destination_city` | String | Übernommene Ziel-Gemeinde exakt aus unserer App-Antwort übernehmen. |
-| `destination_street` | String | Übernommener Ziel-Straßenname aus der App-Antwort. |
-| `destination_house_number` | String | Übernommene Ziel-Hausnummer aus der App-Antwort. |
-| `destination_public_name` | String | publicName der übernommenen vollständigen Ziel-Adresse aus der App-Antwort. |
-| `destination_address_line` | String | addressLine der übernommenen vollständigen Ziel-Adresse aus der App-Antwort. |
-| `destination_longitude` | Number | longitude der übernommenen Ziel-Adresse exakt aus unserer App-Antwort. Keine Koordinaten erfinden. |
-| `destination_latitude` | Number | latitude der übernommenen Ziel-Adresse exakt aus unserer App-Antwort. Nicht mit longitude vertauschen. |
-| `travel_time` | String | Gewünschter Reisezeitpunkt als ISO-8601 mit passendem UTC-Offset für Europe/Vienna am Reisedatum. Bei Unklarheit fragen. |
-| `passenger_count` | Number | Gewünschte Anzahl der Mitfahrenden als ganze Zahl von 1 bis 8. Klare gültige Angabe direkt übernehmen, ohne Bestätigungsfrage. |
-| `selected_proposal_token` | String | proposalToken der gerade ausgewählten und vollständig vorgelesenen Fahrt. Exakt aus der aktuellen App-Antwort kopieren. |
+| `selected_ride_option` | String | Buchstabe A, B oder C der gerade ausgewählten und vollständig vorgelesenen Fahrt. Bei genau einer Fahrt A verwenden. |
 | `booking_confirmed` | Boolean | true ausschließlich nach ausdrücklicher Buchungszustimmung zur vollständig vorgelesenen aktuellen Fahrt. false bei Ablehnung. A/B/C-Auswahl allein genügt nicht. |
 | `booking_reply` | String | Die verstandene Antwort auf die gesonderte Buchungsfrage. |
 
-**Response handling:** Verify the signed proposal against the full current trip. true makes one submission attempt for this HTTP request; false returns refusal and submits nothing. A repeated HTTP request is not guaranteed deduplicated. booking_pending means awaiting driver approval. booking_outcome_unknown must not trigger an automatic retry.
+**Response handling:** The backend resolves the option letter against the latest proposals stored for this session. true makes one submission attempt for this HTTP request; false returns refusal and submits nothing. A repeated HTTP request is not guaranteed deduplicated. booking_pending means awaiting driver approval. booking_outcome_unknown must not trigger an automatic retry.
 
 ## 4. API reference and acceptance checks
 
 ### 4.1 Request context and identity
 
-Every request requires the starter key and the same sessionId for the current call. sessionId is top-level metadata, outside from/destination, and must not be used to fill in missing address context. Address endpoints accept exactly one populated `from` or `destination` object and use only its supplied fields. There is no backend current-address selector or evolving caller session. A response contains the same object key, so Fonio knows which specific variables to update.
+Every request requires the starter key and the same sessionId for the current call. sessionId is top-level metadata and identifies the evolving server-side call session. Address endpoints still accept exactly one populated `from` or `destination` object; a response contains the same object key, so Fonio knows which variables to update.
 
 The canonical `from` and `destination` shapes for ride search contain postcode, city, street, houseNumber, publicName, addressLine, longitude and latitude, as shown in the webhook bodies. Input postcode/houseNumber fields are strings. Coordinates are numeric and copied from geographic results. `seatsRequested` is the passenger count, an integer from 1 to 8. `time` is an ISO-8601 timestamp with an explicit offset or Z; resolve relative words using Europe/Vienna and the actual date. Do not silently default missing travel requirements.
 
-**Optional-postcode rule:** city search/selection, address search/selection, ride search and join accept `postcode` omitted or as `""` when unknown. Existing Fonio body templates use an empty string for this case; the backend normalises omission and empty string identically before token comparison. Postcode validation itself requires a supplied input and is skipped when unknown. The caller must supply a city for city-first lookup; a known city plus street/number can resolve the final address without asking the caller for a postcode. The provider may later supply a postcode, which Fonio copies from the accepted response. Do not erase a conflicting supplied postcode silently.
+**Optional-postcode rule:** city search/selection, address search/selection and ride search accept `postcode` omitted or as `""` when unknown. Existing Fonio body templates use an empty string for this case; the backend normalises omission and empty string identically before context comparison. Postcode validation itself requires a supplied input and is skipped when unknown. The caller must supply a city for city-first lookup; a known city plus street/number can resolve the final address without asking the caller for a postcode. The provider may later supply a postcode, which Fonio copies from the accepted response. Do not erase a conflicting supplied postcode silently.
 
-Verify that Fonio actually sends an empty string for this optional value in the multi-step test. If its configuration cannot represent that, use a supported optional-field mapping or an explicit city-first body omitting postcode; do not fabricate a value. Coordinates, labels, time and passenger count remain required at ride search/join.
+Verify that Fonio actually sends an empty string for this optional value in the multi-step test. If its configuration cannot represent that, use a supported optional-field mapping or an explicit city-first body omitting postcode; do not fabricate a value. Coordinates, labels, time and passenger count remain required at ride search.
 
 The app forwards the resolved passenger coordinates, labels, time and seats to the existing mobie adapter. One running starter still uses one Auth0 passenger account. Multiple callers can have separate request context but would still book as that same account; individual caller-to-account identity is outside this demo. A session ID alone would not solve authentication or authorisation.
 
@@ -903,18 +859,18 @@ Illustrative city search with two fictional candidates:
   "status": "needs_selection",
   "message": "Option A: Musterstadt Nord. Option B: Musterstadt Süd. Welche Option meinst du?",
   "candidates": [
-    { "option": "A", "candidateToken": "candidate-example-a", "label": "Musterstadt Nord", "spokenLabel": "Musterstadt Nord", "city": "Musterstadt Nord" },
-    { "option": "B", "candidateToken": "candidate-example-b", "label": "Musterstadt Süd", "spokenLabel": "Musterstadt Süd", "city": "Musterstadt Süd" }
+    { "option": "A", "label": "Musterstadt Nord", "spokenLabel": "Musterstadt Nord", "city": "Musterstadt Nord" },
+    { "option": "B", "label": "Musterstadt Süd", "spokenLabel": "Musterstadt Süd", "city": "Musterstadt Süd" }
   ],
   "hasMore": false
 }
 ```
 
-The candidate references bind the original search input, its side (`from` or `destination`) and geographic context. Confirmation sends that same context, candidateToken and the caller's choice. The app verifies the self-contained token signature, context, completeness and expiry, then returns canonical values under `accepted`. It does not load a saved candidate record. No searchId or stored conversation is required. The supplied sessionId remains the call-correlation reference. The client must discard old references on corrections; without a caller-state store the app cannot know that another search happened, so it validates context/expiry rather than claiming to enforce a global “latest search”.
+The option letters refer to the ordered latest search stored for that session and side. Confirmation sends the same context and the selected letter. The app verifies both against the stored candidate record, then returns canonical values under `accepted`. A newer search or address correction invalidates the old option mapping automatically.
 
 An accepted city returns the canonical city and postcode if uniquely determinable, otherwise `postcode: ""`. A city may cover several postcodes; this does not require a postcode-choice question when city and later street/number can resolve the location. An accepted complete address returns canonical city/street/number, labels and coordinates, plus postcode when the provider supplies it, otherwise an empty string. Missing optional postcode alone must not block resolution. Missing required precision, coordinates or conflicting components require clarification rather than invented values. Unique matches use `selectionMethod: "automatic"`; caller choices use `selectionMethod: "caller_choice"`. Neither proves intended-location correctness.
 
-City/address search returns at most three deduplicated eligible `candidates`. Ride search returns at most three `proposals`. The app assigns A/B/C in returned order and sets `hasMore` when more eligible options were omitted. Each candidate/proposal also includes a short `spokenLabel` containing the distinguishing information; full fields remain available for the final summary. Repeat commands use the same list and tokens, not a new search. Do not suppress plausible alternatives just to force automatic advancement. Postcode is direct validation, not an options list. Zero city/address matches require clarification; zero rides means no_rides. A technical failure is neither.
+City/address search returns at most three deduplicated eligible `candidates`. Ride search returns at most three `proposals`. The app assigns A/B/C in returned order and sets `hasMore` when more eligible options were omitted. Each candidate/proposal also includes a short `spokenLabel` containing the distinguishing information; full fields remain available for the final summary. Repeat commands use the same stored list and letters, not a new search. Do not suppress plausible alternatives just to force automatic advancement. Postcode is direct validation, not an options list. Zero city/address matches require clarification; zero rides means no_rides. A technical failure is neither.
 
 | Status | Action |
 | --- | --- |
@@ -927,42 +883,42 @@ City/address search returns at most three deduplicated eligible `candidates`. Ri
 | `booking_pending` | Request stored; awaiting driver approval. |
 | `booking_outcome_unknown` | Submission may have succeeded; check before any retry. |
 
-Responses omit nextStep; Fonio follows the documented dependency order rather than a server-maintained conversation state: start city/context → complete address → destination city/context → complete address → travel requirements → ride → booking consent. Validate supplied postcodes before using them, but skip postcode tools when unknown. Validation calls still run for volunteered fields; questions are asked only for missing or conflicting information. Clarifications repeat their step; corrections revalidate affected context and clear dependent accepted values without discarding other raw input.
+Responses omit nextStep; Fonio follows the documented dependency order while the server stores the validated state: start city/context → complete address → destination city/context → complete address → travel requirements → ride → booking consent. Validate supplied postcodes before using them, but skip postcode tools when unknown. Validation calls still run for volunteered fields; questions are asked only for missing or conflicting information. Clarifications repeat their step; corrections revalidate affected context and clear dependent accepted values without discarding other raw input.
 
 ### 4.3 Selection and booking boundaries
 
-City/address `/confirm` routes validate an option choice and return the accepted canonical values; they do not store that choice. `confirmed: true` means an unambiguous A/B/C choice, without another yes/no question. false can reject a specific candidate. If all options are rejected, ask for corrected input and search again. Never fabricate a token or infer consent from silence.
+City/address `/confirm` routes validate the supplied A/B/C letter against the current ordered options and original context, store the accepted canonical values and return them. `confirmed: true` means an unambiguous A/B/C choice, without another yes/no question. false can reject a specific option. If all options are rejected, ask for corrected input and search again. Never fabricate a choice or infer consent from silence.
 
-Ride search requires both complete accepted locations, time and passenger count. Each proposal contains a proposalToken and the ride summary: rideId, passenger start/destination, actual pickup location/time when available, available driver details, seats and price/payment information. The driver route's start/time may differ from passenger pickup. Do not invent missing details or describe unknown prices as free. Convert cents correctly. The ranking rule is still to be defined.
+Ride search requires both complete accepted locations, time and passenger count. Each public proposal contains its option letter and ride summary: passenger start/destination, actual pickup location/time when available, available driver details, seats and price/payment information. The underlying ride ID stays in the backend session. The driver route's start/time may differ from passenger pickup. Do not invent missing details or describe unknown prices as free. Convert cents correctly. The ranking rule is still to be defined.
 
-For multiple rides, an A/B/C answer selects a proposal but does not book it. Read the selected trip and ask “Soll ich für diese Fahrt eine Buchungsanfrage senden?” even when there is only one ride. The booking tool sends the **full current trip** plus proposalToken and the answer. The app verifies the signed proposal token and compares its embedded trip, expiry and passenger identity with the supplied current trip and signed-in passenger before submitting. No saved proposal record is required. A changed address, time or count requires another search; it must not book the old proposal.
+For multiple rides, an A/B/C answer selects a proposal but does not book it. Read the selected trip and ask “Soll ich für diese Fahrt eine Buchungsanfrage senden?” even when there is only one ride. The booking tool sends sessionId, the selected option letter and the answer. The app loads the corresponding latest stored proposal, checks the signed-in passenger and submits the trip stored with that proposal. A changed address, time or count invalidates stored proposals and requires another search.
 
-**Stateless booking limitation:** a signed proposal token does not make a write single-use. With no submission store, the app cannot guarantee deduplication or detect replay of an already-used token. Fonio must send consent once and must not retry automatically. If the response is lost or times out, report an unknown outcome and check mobie staging before any retry. The mobie endpoint is not assumed idempotent; its duplicate-request rejection is not a general exactly-once guarantee. Reliable retry/replay prevention would require backend-supported idempotency or a deliberately introduced submission record, which is deferred rather than claimed here. A successful response remains pending until driver approval.
+After a successful or uncertain submission, the selected proposal is removed from the session to prevent an immediate replay. This is still not end-to-end idempotency: if the response is lost or times out, report an unknown outcome and check mobie staging before any retry. A successful response remains pending until driver approval.
 
 ### 4.4 Limits and failures
 
 - Proposed raw address-field limit: 256 characters each. Keep the existing JSON body limit of 16 KiB.
-- Reject missing context, invalid coordinates, malformed or invalidly signed candidate/proposal tokens, mismatched input context and expired references. Never use another request's mutable state to fill gaps.
-- Proposed token lifetime: 15 minutes; refreshed searches return fresh signed tokens. Exact lifetime, signing-secret configuration and rotation need implementation. Verification uses server configuration, not a per-call store.
-- Proposed HTTP errors: 400 invalid input/context, 401 missing starter key/passenger login, 409 mismatched or conflicting proposal, 410 expired reference, 413 oversized body, 415 wrong content type, 502 provider failure, 503 unavailable configuration. Malformed or invalidly signed tokens are 400.
+- Reject missing context, invalid coordinates, option letters absent from the current result, stale option mappings and expired sessions. Never use another session's mutable state to fill gaps.
+- In-memory sessions expire after 45 minutes of inactivity. A refreshed search replaces the selectable candidate/proposal records for the affected state.
+- Proposed HTTP errors: 400 invalid input/context, 401 missing starter key/passenger login, 409 stale or mismatched session selection, 413 oversized body, 415 wrong content type, 502 provider failure, 503 unavailable configuration.
 - Proposed guided-route errors use `{ "error": { "code": "...", "message": "..." } }` with a short German message. Existing technical routes still use their current string-error format.
 - Distinguish an invalid request shape/type or missing required context (HTTP 400) from a well-formed postcode/city/address query that cannot be resolved (`needs_clarification`, HTTP 200). Fonio asks for missing caller input before calling a tool, and can use a validation-error message to request a corrected value without advancing.
-- City-first lookup with unknown postcode is now part of this proposed contract and requires implementation. Postcode/city data coverage and missing-house-number/landmark support remain open implementation decisions. None of the guided paths is live yet.
-- Signed tokens and explicit request context isolate data, but caller identity, persistent conversations, call tracing and richer session management are separate future concerns. Do not store unnecessary caller personal data.
+- City-first lookup with an omitted or empty postcode is implemented. Postcode/city data coverage and missing-house-number/landmark support remain open implementation decisions. Live Fonio verification is still pending.
+- Session IDs and per-session locks isolate concurrent calls in this single-process hackathon implementation. Persistent/multi-instance sessions remain future work. Do not store unnecessary caller personal data.
 
 ### 4.5 Acceptance checks
 
-1. Every body includes sessionId for correlation, while address processing depends on explicit context rather than a stored session or global current trip. There is no addressRole field. All twelve Fonio tools map explicit variables to the seven app routes.
-2. Start values never overwrite destination values. Parallel requests using different inputs do not share mutable address state.
+1. Every body includes sessionId, which selects one short-lived in-memory call session. There is no addressRole field. All twelve Fonio tools map explicit variables to the seven guided app routes.
+2. Start values never overwrite destination values. Different session IDs do not share mutable address state.
 3. Clear valid supplied postcode and passenger count need no confirmation. Unknown postcode proceeds through city-first lookup, without a postcode tool call. Missing/unclear required city, address or passenger information asks for clarification.
-4. One city/address option advances automatically. Two or three use short A/B/C spoken labels and retain the exact chosen values after app validation, without another yes/no question. A repeat request preserves labels/tokens and triggers no new search. Zero options do not advance.
-5. The app enforces the three-option cap and accurate hasMore values. Candidate identity is distinct from the spoken option letter.
-6. App-returned canonical fields, coordinates and tokens survive real Fonio tool-to-tool calls exactly using section 2.4's mapping. Missing values and invalid JSON substitution are caught.
-7. City/address selection verifies token signature, original query, its side, geographic context and expiry without a server-side candidate record. Corrections clear dependent Fonio variables and old references.
+4. One city/address option advances automatically. Two or three use short A/B/C spoken labels and retain the exact chosen values after app validation, without another yes/no question. A repeat request preserves labels/letters and triggers no new search. Zero options do not advance.
+5. The app enforces the three-option cap and accurate hasMore values. Fonio returns only the selected A/B/C letter; internal candidate identity never crosses the voice boundary.
+6. App-returned canonical fields and coordinates survive real Fonio tool-to-tool calls exactly using section 2.4's mapping. Missing values and invalid JSON substitution are caught.
+7. City/address selection verifies the option letter, original query and side against the current server-side session record. Corrections clear dependent Fonio variables and invalidate stored option mappings.
 8. Ride search includes both resolved locations, explicit time and passenger count; a valid address does not prove caller intent or ride availability.
 9. A sole ride still requires booking consent. Multiple rides require choice and then separate booking consent. Refusal or unclear consent never submits.
-10. The booking request includes full current trip context, not just proposalToken. Context changes, expiry or passenger changes prevent reuse.
-11. Fonio does not duplicate submissions or blindly retry unknown write outcomes. Test that the documented stateless limit is explicit: repeated identical HTTP writes cannot be guaranteed deduplicated. A successful request is pending and is verified/approved in the separate driver's app.
+10. The booking request includes sessionId and the selected ride option letter. Context changes, a newer search, session expiry or passenger changes prevent reuse.
+11. Fonio does not duplicate submissions or blindly retry unknown write outcomes. Consumed proposals are removed from the session, but repeated writes are not guaranteed exactly once across process failures. A successful request is pending and is verified/approved in the separate driver's app.
 12. A full address volunteered early does not trigger repeated questions for its known fields. Unknown postcode is not a hard stop. Validate all supplied context before using canonical fields.
 13. The complete passenger trip, actual pickup, date/time, passenger count, available driver and price information are read before every booking consent question, including automatically accepted addresses. A correction invalidates prior consent and re-runs affected lookup/ride search.
 14. Date, time and passenger count are collected with one combined question when all are missing. Partial answers retain the known values and prompt only for missing or unclear parts; they do not restart all three questions.
@@ -974,26 +930,26 @@ Run this against controlled test responses first, once the guided endpoints or a
 1. Check sessionId is nonempty and identical across all requests of one call, is echoed unchanged, and differs on a new call. Check dev and real-call metadata separately. Then return a canonical city deliberately different from the spoken input, as in section 2.4. Verify that the next address request sends exactly that canonical city and the returned postcode.
 2. Return canonical street/house-number values and distinct numeric coordinates. Verify that ride search sends exactly those returned values and numbers, rather than the original street input, rounded coordinates or invented values.
 3. Repeat for destination with different values. Confirm that none of the start variables changes.
-4. Return three options, choose B, and verify the selection request carries B's exact token plus the original query context. Verify the following request uses the accepted values returned by the selection response.
+4. Return three options, choose B, and verify the selection request carries `option: "B"` plus the original query context. Verify the following request uses the accepted values returned by the selection response.
 5. Return clarification, an error or a response missing a required field. Confirm that Fonio does not advance using an unaccepted candidate or stale value.
-6. Return two rides, choose one and verify the selected proposal token. Confirm that no booking call is made with positive consent until the caller answers the separate booking question.
+6. Return two rides, choose B and verify the booking request carries `option: "B"`. Confirm that no booking call is made with positive consent until the caller answers the separate booking question.
 
 7. Run a city-first lookup with postcode omitted and with `""`; verify equivalent behaviour, successful address resolution and no request for a caller confirmation of postcode. If the app returns a postcode later, verify it is reused.
 8. Volunteer a full start/destination address and travel requirements at the beginning. Verify retained inputs are validated without repeated questions and without bypassing required provider calls.
-9. Ask “repeat B”. Verify only B is repeated, its token/letter stays unchanged, no search is called and no selection/booking is submitted.
+9. Ask “repeat B”. Verify only B is repeated, its letter stays unchanged, no search is called and no selection/booking is submitted.
 10. Correct a house number during the final booking read-back. Verify no join occurs, other raw inputs are retained, affected coordinates/proposal/consent are cleared, and a new search and full read-back precede fresh consent.
 
 Record the response/next-request pairs as the evidence for chaining. If Fonio cannot reliably retain and reuse these fields, the configuration must be changed to a supported deterministic mapping mechanism or the contract simplified; do not mark the flow verified based only on the prompt. This verification has **not yet been performed** for the guided tools.
 
-### 4.7 Required development
+### 4.7 Implementation status
 
-Implement the seven guided routes, optional-postcode/city-first lookup, processor integration, explicit context validation, short spoken labels, bounded options and self-contained signed candidate/proposal tokens. Configure volunteered-field reuse, repeat-option handling and corrections before booking in Fonio. Pass through sessionId as correlation metadata without introducing conversation, search or proposal storage. Keep robust booking idempotency as an explicit future decision; unknown booking outcomes are checked in staging before retry. No guided routes are implemented today; the existing NestJS Mapbox/mobie adapters and receipt receiver are the available building blocks.
+The seven guided routes, optional-postcode/city-first lookup, explicit context validation, short spoken labels, bounded options and in-memory call sessions are implemented. Fonio returns A/B/C letters, which resolve against opaque candidate and ride IDs kept only in the latest matching backend session state. Sessions expire after 45 minutes and `/api/voice/sessions/end` removes them explicitly. Fonio still needs configured and verified volunteered-field reuse, repeat-option handling and corrections before booking. Robust booking idempotency remains an explicit future decision; unknown booking outcomes must be checked in staging before retry.
 
 Related: [architecture](../architecture/voice-ride-booking.md), [string processor scope](../architecture/voice-ride-booking.md#string-processor-scope-and-error-model), [existing API reference](../api.md), [working Fonio receipt setup](../packages/fonio-trip-receipt.md).
 
 ## 5. Caller usability assessment
 
-Status: design review on 14 October 2026, **not a usability test with callers**. The findings are reasoned risks based on the documented flow. Completion time, recognition accuracy, satisfaction and abandonment have not been measured. The four approved improvements are now incorporated into the proposed contract, prompt, diagram and webhook rules: city-first fallback, volunteered-field reuse, complete final read-back with corrections, and short/repeatable A/B/C options. They have not been implemented or tested live. Other findings below remain recommendations.
+Status: design review on 14 October 2026, **not a usability test with callers**. The findings are reasoned risks based on the documented flow. Completion time, recognition accuracy, satisfaction and abandonment have not been measured. Backend support for city-first fallback, complete canonical responses and short A/B/C options is implemented; volunteered-field reuse, repeat handling and correction behavior still require live Fonio configuration and testing. Other findings below remain recommendations.
 
 ### 5.1 Overall assessment
 

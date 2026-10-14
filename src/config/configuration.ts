@@ -53,7 +53,6 @@ export function loadConfig(env: Environment = process.env): AppConfig {
   if (apiKey.length < 32) {
     throw new Error('STARTER_API_KEY must have at least 32 characters. Generate one with npm run setup.');
   }
-
   const positiveInteger = (name: string, fallback: number, minimum = 1): number => {
     const value = Number(env[name] || fallback);
     if (!Number.isInteger(value) || value < minimum) {
