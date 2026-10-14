@@ -55,7 +55,7 @@ export class VoiceController {
   @Post('sessions/end')
   @HttpCode(200)
   public endCall(@Body() body: CallEndDto) {
-    return this.voice.endCall(body.callId);
+    return this.voice.endCall(body.sessionId);
   }
 }
 

@@ -6,6 +6,9 @@ import { InMemoryCallSessionStore } from './session/in-memory-call-session.store
 import { AddressResolutionService } from './services/address-resolution.service.js';
 import { VoiceOrchestrationService } from './services/voice-orchestration.service.js';
 import { VoiceBookingController, VoiceController } from './voice.controller.js';
+import { OpenPlzService } from './providers/openplz.service.js';
+import { PostcodeCacheService } from './cache/postcode-cache.service.js';
+import { StreetMatchingService } from './services/street-matching.service.js';
 
 @Module({
   imports: [InboundModule, MapboxModule],
@@ -14,6 +17,9 @@ import { VoiceBookingController, VoiceController } from './voice.controller.js';
     InMemoryCallSessionStore,
     { provide: CALL_SESSION_STORE, useExisting: InMemoryCallSessionStore },
     AddressResolutionService,
+    OpenPlzService,
+    PostcodeCacheService,
+    StreetMatchingService,
     VoiceOrchestrationService,
   ],
   exports: [CALL_SESSION_STORE],

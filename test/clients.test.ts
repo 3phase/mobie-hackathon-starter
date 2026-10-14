@@ -13,6 +13,8 @@ import { MobieService } from '../src/mobie/mobie.service.js';
 const baseConfig: AppConfig = {
   issuer: 'https://tenant.example', clientId: 'client', audience: 'audience', redirectUri: 'http://localhost:3000/callback',
   baseUrl: 'https://staging.example', apiKey: 'test-key-with-at-least-32-characters', mapboxToken: '', port: 3000, host: '127.0.0.1',
+  openPlzBaseUrl: 'https://openplzapi.org', openPlzCacheTtlMs: 86_400_000,
+  openPlzCacheMaxEntries: 100, openPlzTimeoutMs: 8_000, openPlzRetries: 2,
 };
 const ride = {
   departure: { publicName: 'Start', latitude: 48.2, longitude: 16.3 },

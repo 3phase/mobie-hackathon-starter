@@ -25,22 +25,68 @@ const rideSearchResponse = [{
 const config: AppConfig = {
   apiKey: key, issuer: 'https://auth.example', clientId: 'client', audience: 'https://staging.example',
   redirectUri: 'http://localhost:3000/callback', baseUrl: 'https://staging.example', mapboxToken: 'mapbox-token',
+  openPlzBaseUrl: 'https://openplzapi.org', openPlzCacheTtlMs: 86_400_000,
+  openPlzCacheMaxEntries: 100, openPlzTimeoutMs: 8_000, openPlzRetries: 0,
   port: 3000, host: '127.0.0.1',
 };
+
+const openPlzMunicipalities = {
+  '1030': { key: '90001', code: '90001', name: 'Wien', status: 'Statutarstadt' },
+  '4020': { key: '40101', code: '40101', name: 'Linz', status: 'Statutarstadt' },
+} as const;
+
+function openPlzResponse(url: URL): Response {
+  const postcode = url.searchParams.get('postalCode') as keyof typeof openPlzMunicipalities;
+  const municipality = openPlzMunicipalities[postcode];
+  const localityName = postcode === '4020' ? 'Linz' : 'Wien, Landstraße';
+  const base = {
+    postalCode: postcode,
+    municipality,
+    district: { key: postcode === '4020' ? '401' : '900', code: postcode === '4020' ? '401' : '903', name: localityName },
+    federalProvince: { key: postcode === '4020' ? '4' : '9', name: postcode === '4020' ? 'Oberösterreich' : 'Wien' },
+  };
+  const body = url.pathname.endsWith('/Localities')
+    ? [{ ...base, key: `locality-${postcode}`, name: localityName }]
+    : [{ ...base, key: `street-${postcode}`, name: postcode === '4020' ? 'Hauptplatz' : 'Landstraßer Hauptstraße', locality: localityName }];
+  return Response.json(body, { headers: {
+    'x-page': '1', 'x-page-size': '50', 'x-total-count': '1', 'x-total-pages': '1',
+  } });
+}
 
 async function fixture(t: test.TestContext): Promise<{
   app: INestApplication;
   writes: () => number;
   joinedPayloads: () => Record<string, unknown>[];
+  addressGeocodes: () => number;
 }> {
   let writes = 0;
+  let addressGeocodes = 0;
   const joinedPayloads: Record<string, unknown>[] = [];
   const fetch: FetchFunction = async (input, init) => {
     const url = String(input);
     if (url.endsWith('/oauth/token')) {
       return Response.json({ access_token: 'private-access', refresh_token: 'private-refresh', expires_in: 3600, token_type: 'Bearer' });
     }
+    if (url.startsWith('https://openplzapi.org/')) return openPlzResponse(new URL(url));
     if (url.includes('api.mapbox.com')) {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('address_number')) {
+        addressGeocodes += 1;
+        const street = parsed.searchParams.get('street')!;
+        const postcode = parsed.searchParams.get('postcode')!;
+        const houseNumber = parsed.searchParams.get('address_number')!;
+        const city = parsed.searchParams.get('place')!;
+        return Response.json({ features: [{
+          id: `address.${postcode}.${houseNumber}`,
+          geometry: { coordinates: postcode === '4020' ? [14.286, 48.306] : [16.39, 48.197] },
+          properties: {
+            feature_type: 'address', name: street, address_number: houseNumber,
+            full_address: `${street} ${houseNumber}, ${postcode} ${city}`,
+            context: { postcode: { name: postcode }, place: { name: city } },
+            match_code: { address_number: 'exact', street: 'exact', postcode: 'exact', place: 'exact' },
+          },
+        }], attribution: 'Mapbox' });
+      }
       return Response.json({ features: [{ geometry: { coordinates: [16.3, 48.2] }, properties: { name: 'Wien' } }], attribution: 'Mapbox' });
     }
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer private-access');
@@ -63,7 +109,7 @@ async function fixture(t: test.TestContext): Promise<{
   configureApplication(app);
   await app.init();
   t.after(async () => app.close());
-  return { app, writes: () => writes, joinedPayloads: () => joinedPayloads };
+  return { app, writes: () => writes, joinedPayloads: () => joinedPayloads, addressGeocodes: () => addressGeocodes };
 }
 
 async function signIn(app: INestApplication): Promise<{ cookie: string; authorize: URL }> {
@@ -251,72 +297,73 @@ test('trip join requires a string ID from a recent completed search', async (t) 
 });
 
 test('voice routes collect independent addresses, reject stale choices, search rides and reuse booking', async (t) => {
-  const { app, writes } = await fixture(t);
+  const { app, writes, addressGeocodes } = await fixture(t);
   await signIn(app);
   const server = app.getHttpServer();
   const headers = { Authorization: authorization };
-  const callId = 'fonio-call-123';
+  const sessionId = 'fonio-call-123';
 
   const originPostcode = await request(server)
     .post('/api/voice/postcodes/search').set(headers)
-    .send({ callId, side: 'origin', postcode: ' 1030 ' }).expect(200);
+    .send({ sessionId, side: 'origin', postcode: ' 1030 ' }).expect(200);
   assert.equal(originPostcode.body.data.postcode, '1030');
-  assert.equal(originPostcode.body.status, 'NEEDS_CONFIRMATION');
+  assert.equal(originPostcode.body.status, 'RESOLVED');
+  assert.equal(originPostcode.body.data.city, 'Wien');
 
-  const originCity = await request(server)
-    .post('/api/voice/cities/search').set(headers)
-    .send({ callId, side: 'origin', city: 'Wien' }).expect(200);
-  const staleCityId = originPostcode.body.candidates[0].id as string;
-  await request(server)
-    .post('/api/voice/cities/confirm').set(headers)
-    .send({ callId, side: 'origin', candidateId: staleCityId })
-    .expect(200, {
-      status: 'INVALID_CONTEXT', callId, side: 'origin',
-      clarificationQuestion: 'That candidate is invalid or stale. Search again before selecting an option.',
-    });
-  await request(server)
-    .post('/api/voice/cities/confirm').set(headers)
-    .send({ callId, side: 'origin', candidateId: originCity.body.candidates[0].id }).expect(200);
-
-  const originAddress = await request(server)
+  const staleOriginAddress = await request(server)
     .post('/api/voice/addresses/search').set(headers)
-    .send({ callId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
+    .send({ sessionId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
+  assert.equal(addressGeocodes(), 0, 'OpenPLZ discovery must not call Mapbox');
+  await request(server)
+    .post('/api/voice/postcodes/search').set(headers)
+    .send({ sessionId, side: 'origin', postcode: '1030' }).expect(200);
   await request(server)
     .post('/api/voice/addresses/confirm').set(headers)
-    .send({ callId, side: 'origin', candidateId: originAddress.body.candidates[0].id }).expect(200);
+    .send({ sessionId, side: 'origin', candidateId: staleOriginAddress.body.candidates[0].id })
+    .expect(200, {
+      status: 'INVALID_CONTEXT', sessionId, side: 'origin',
+      clarificationQuestion: 'That candidate is invalid or stale. Search again before selecting an option.',
+    });
+  const originAddress = await request(server)
+    .post('/api/voice/addresses/search').set(headers)
+    .send({ sessionId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
+  await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({ sessionId, side: 'origin', candidateId: originAddress.body.candidates[0].id }).expect(200);
+  assert.equal(addressGeocodes(), 1);
 
   const unresolved = await request(server)
     .post('/api/voice/rides/search').set(headers)
-    .send({ callId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
   assert.deepEqual(unresolved.body.data.unresolved, ['destination']);
 
-  const destinationCity = await request(server)
-    .post('/api/voice/cities/search').set(headers)
-    .send({ callId, side: 'destination', city: 'Linz' }).expect(200);
-  await request(server)
-    .post('/api/voice/cities/confirm').set(headers)
-    .send({ callId, side: 'destination', candidateId: destinationCity.body.candidates[0].id }).expect(200);
+  const destinationPostcode = await request(server)
+    .post('/api/voice/postcodes/search').set(headers)
+    .send({ sessionId, side: 'destination', postcode: '4020' }).expect(200);
+  assert.equal(destinationPostcode.body.data.city, 'Linz');
   const destinationAddress = await request(server)
     .post('/api/voice/addresses/search').set(headers)
-    .send({ callId, side: 'destination', street: 'Hauptplatz', houseNumber: '1' }).expect(200);
+    .send({ sessionId, side: 'destination', street: 'Hauptplatz', houseNumber: '1' }).expect(200);
+  assert.equal(addressGeocodes(), 1);
   await request(server)
     .post('/api/voice/addresses/confirm').set(headers)
-    .send({ callId, side: 'destination', candidateId: destinationAddress.body.candidates[0].id }).expect(200);
+    .send({ sessionId, side: 'destination', candidateId: destinationAddress.body.candidates[0].id }).expect(200);
+  assert.equal(addressGeocodes(), 2);
 
   const ride = await request(server)
     .post('/api/voice/rides/search').set(headers)
-    .send({ callId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
   assert.equal(ride.body.status, 'RESOLVED');
   assert.equal(ride.body.data.rideDetails.rideId, 'ride-1');
   await request(server).post('/ride/join').set(headers).send({ rideId: 'ride-1' }).expect(200);
   assert.equal(writes(), 1);
 
   await request(server)
-    .post('/api/voice/sessions/end').set(headers).send({ callId }).expect(200, {
-      status: 'RESOLVED', callId, data: { deleted: true },
+    .post('/api/voice/sessions/end').set(headers).send({ sessionId }).expect(200, {
+      status: 'RESOLVED', sessionId, data: { deleted: true },
     });
   const expired = await request(server)
     .post('/api/voice/rides/search').set(headers)
-    .send({ callId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
   assert.equal(expired.body.status, 'INVALID_CONTEXT');
 });

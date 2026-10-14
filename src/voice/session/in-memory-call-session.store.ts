@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { HttpError } from '../../common/errors/http.error.js';
+import { CLOCK, type Clock } from '../../common/providers/runtime.providers.js';
 import type { CallSessionStore } from './call-session-store.interface.js';
 import {
   AddressSide,
@@ -24,7 +25,11 @@ function collectingAddress(address: AddressState, patch: AddressPatch = {}): Add
   return {
     ...(merged.postcode ? { postcode: merged.postcode } : {}),
     ...(merged.city ? { city: merged.city } : {}),
+    ...(merged.locality ? { locality: merged.locality } : {}),
+    ...(merged.municipalityKey ? { municipalityKey: merged.municipalityKey } : {}),
+    ...(merged.localityKey ? { localityKey: merged.localityKey } : {}),
     ...(merged.street ? { street: merged.street } : {}),
+    ...(merged.streetKey ? { streetKey: merged.streetKey } : {}),
     ...(merged.houseNumber ? { houseNumber: merged.houseNumber } : {}),
     status: 'COLLECTING',
     candidates: [],
@@ -35,14 +40,12 @@ function collectingAddress(address: AddressState, patch: AddressPatch = {}): Add
 export class InMemoryCallSessionStore implements CallSessionStore {
   private readonly sessions = new Map<string, CallSession>();
   private readonly locks = new Map<string, Promise<void>>();
+  private readonly ttlMs = CALL_SESSION_TTL_MS;
 
-  public constructor(
-    private readonly now: () => number = Date.now,
-    private readonly ttlMs: number = CALL_SESSION_TTL_MS,
-  ) {}
+  public constructor(@Inject(CLOCK) private readonly now: Clock = Date.now) { }
 
-  public get(callId: string): CallSession | undefined {
-    const id = this.callId(callId);
+  public get(sessionId: string): CallSession | undefined {
+    const id = this.sessionId(sessionId);
     const session = this.sessions.get(id);
     if (!session) return undefined;
     if (this.now() - session.updatedAt >= this.ttlMs) {
@@ -52,13 +55,13 @@ export class InMemoryCallSessionStore implements CallSessionStore {
     return clone(session);
   }
 
-  public getOrCreate(callId: string): CallSession {
-    const id = this.callId(callId);
+  public getOrCreate(sessionId: string): CallSession {
+    const id = this.sessionId(sessionId);
     const existing = this.get(id);
     if (existing) return existing;
     const now = this.now();
     const session: CallSession = {
-      callId: id,
+      sessionId: id,
       origin: initialAddress(),
       destination: initialAddress(),
       createdAt: now,
@@ -69,27 +72,48 @@ export class InMemoryCallSessionStore implements CallSessionStore {
   }
 
   public save(session: CallSession): CallSession {
-    const callId = this.callId(session.callId);
-    const saved = clone({ ...session, callId, updatedAt: this.now() });
-    this.sessions.set(callId, saved);
+    const sessionId = this.sessionId(session.sessionId);
+    const saved = clone({ ...session, sessionId, updatedAt: this.now() });
+    this.sessions.set(sessionId, saved);
     return clone(saved);
   }
 
-  public delete(callId: string): boolean {
-    return this.sessions.delete(this.callId(callId));
+  public delete(sessionId: string): boolean {
+    return this.sessions.delete(this.sessionId(sessionId));
   }
 
-  public updateAddress(callId: string, side: AddressSide, partialAddress: AddressPatch): CallSession {
-    const session = this.getOrCreate(callId);
+  public updateAddress(sessionId: string, side: AddressSide, partialAddress: AddressPatch): CallSession {
+    const session = this.getOrCreate(sessionId);
     const current = session[side];
     const changed = (Object.keys(partialAddress) as (keyof AddressPatch)[])
       .some((key) => partialAddress[key] !== undefined && partialAddress[key] !== current[key]);
-    const next: AddressState = changed ? collectingAddress(current, partialAddress) : { ...current, ...partialAddress };
+    let source = current;
+    if (partialAddress.postcode !== undefined && partialAddress.postcode !== current.postcode) {
+      source = initialAddress();
+    } else if (partialAddress.city !== undefined && partialAddress.city !== current.city) {
+      source = {
+        ...(current.postcode ? { postcode: current.postcode } : {}),
+        status: 'COLLECTING',
+        candidates: [],
+      };
+    } else if (partialAddress.street !== undefined && partialAddress.street !== current.street) {
+      source = {
+        ...(current.postcode ? { postcode: current.postcode } : {}),
+        ...(current.city ? { city: current.city } : {}),
+        ...(current.locality ? { locality: current.locality } : {}),
+        ...(current.municipalityKey ? { municipalityKey: current.municipalityKey } : {}),
+        ...(current.localityKey ? { localityKey: current.localityKey } : {}),
+        ...(current.houseNumber ? { houseNumber: current.houseNumber } : {}),
+        status: 'COLLECTING',
+        candidates: [],
+      };
+    }
+    const next: AddressState = changed ? collectingAddress(source, partialAddress) : { ...current, ...partialAddress };
     return this.save({ ...session, [side]: next });
   }
 
-  public confirmCandidate(callId: string, side: AddressSide, candidateId: string): CallSession {
-    const session = this.get(callId);
+  public confirmCandidate(sessionId: string, side: AddressSide, candidateId: string): CallSession {
+    const session = this.get(sessionId);
     if (!session) throw new HttpError(409, 'The call session is missing or expired.');
     const current = session[side];
     const candidate = current.candidates.find((item) => item.id === candidateId);
@@ -97,9 +121,13 @@ export class InMemoryCallSessionStore implements CallSessionStore {
 
     if (candidate.kind === 'CITY') {
       const next: AddressState = collectingAddress({
-        ...current,
+        ...(candidate.postcode ?? current.postcode ? { postcode: candidate.postcode ?? current.postcode } : {}),
         ...(candidate.city ? { city: candidate.city } : {}),
-        ...(candidate.postcode ? { postcode: candidate.postcode } : {}),
+        ...(candidate.locality ? { locality: candidate.locality } : {}),
+        ...(candidate.municipalityKey ? { municipalityKey: candidate.municipalityKey } : {}),
+        ...(candidate.localityKey ? { localityKey: candidate.localityKey } : {}),
+        status: 'COLLECTING',
+        candidates: [],
       });
       return this.save({ ...session, [side]: next });
     }
@@ -117,6 +145,11 @@ export class InMemoryCallSessionStore implements CallSessionStore {
       ...current,
       ...(candidate.city ? { city: candidate.city } : {}),
       ...(candidate.postcode ? { postcode: candidate.postcode } : {}),
+      ...(candidate.street ? { street: candidate.street } : {}),
+      ...(candidate.locality ? { locality: candidate.locality } : {}),
+      ...(candidate.municipalityKey ? { municipalityKey: candidate.municipalityKey } : {}),
+      ...(candidate.localityKey ? { localityKey: candidate.localityKey } : {}),
+      ...(candidate.streetKey ? { streetKey: candidate.streetKey } : {}),
       status: 'CONFIRMED',
       candidates: [],
       resolvedLocation,
@@ -124,8 +157,8 @@ export class InMemoryCallSessionStore implements CallSessionStore {
     return this.save({ ...session, [side]: next });
   }
 
-  public async runExclusive<T>(callId: string, operation: () => Promise<T> | T): Promise<T> {
-    const id = this.callId(callId);
+  public async runExclusive<T>(sessionId: string, operation: () => Promise<T> | T): Promise<T> {
+    const id = this.sessionId(sessionId);
     const predecessor = this.locks.get(id) ?? Promise.resolve();
     let release = (): void => undefined;
     const current = new Promise<void>((resolve) => { release = resolve; });
@@ -140,10 +173,10 @@ export class InMemoryCallSessionStore implements CallSessionStore {
     }
   }
 
-  private callId(value: string): string {
+  private sessionId(value: string): string {
     const normalized = value.trim();
     if (!normalized || normalized.length > 256) {
-      throw new HttpError(400, 'callId must be a non-empty string of at most 256 characters.');
+      throw new HttpError(400, 'sessionId must be a non-empty string of at most 256 characters.');
     }
     return normalized;
   }

@@ -72,6 +72,7 @@ test/                          # unit and endpoint compatibility tests
 - **Inbound** owns public HTTP entry points, static content, security headers, and the final 404 route.
 - **Auth** owns OAuth2 Authorization Code + PKCE, state/cookie binding, code exchange, in-memory tokens, serialized rotation, login status, and logout.
 - **Mapbox** validates location queries, encapsulates Geocoding v6, safely narrows untrusted responses, and maps candidates without treating Mapbox feature IDs as mobie IDs.
+- **OpenPLZ voice resolution** loads complete Austrian postcode datasets, caches them across calls, and performs local municipality/locality and fuzzy street matching. See [docs/openplz-address-resolution.md](docs/openplz-address-resolution.md).
 - **Mobie** validates ride payloads, obtains the current user access token, and encapsulates `/me`, search, detail, and join requests.
 - **String processing** trims and validates Fonio's trip strings and converts its numeric seat string before any provider call. More advanced fuzzy matching can be added at this boundary.
 - **Common** contains only cross-cutting concerns: constant-time API-key checks, the `{ "error": "..." }` exception boundary, security headers, and the timeout-limited upstream JSON client.

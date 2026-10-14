@@ -6,6 +6,11 @@ export interface AppConfig {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly mapboxToken: string;
+  readonly openPlzBaseUrl: string;
+  readonly openPlzCacheTtlMs: number;
+  readonly openPlzCacheMaxEntries: number;
+  readonly openPlzTimeoutMs: number;
+  readonly openPlzRetries: number;
   readonly port: number;
   readonly host: string;
 }

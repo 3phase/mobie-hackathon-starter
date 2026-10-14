@@ -32,7 +32,7 @@ test('call sessions are created automatically and keep origin and destination in
   let now = 1_000;
   const store = new InMemoryCallSessionStore(() => now);
   const created = store.getOrCreate('call-1');
-  assert.equal(created.callId, 'call-1');
+  assert.equal(created.sessionId, 'call-1');
   assert.equal(created.origin.status, 'COLLECTING');
   assert.equal(created.destination.status, 'COLLECTING');
 
@@ -72,6 +72,18 @@ test('partial updates preserve fields and invalidate confirmations and stale can
     () => store.confirmCandidate('call-2', AddressSide.ORIGIN, 'address-1'),
     (error: unknown) => error instanceof HttpError && error.status === 409,
   );
+});
+
+test('postcode and city changes clear dependent geographic state', () => {
+  const store = new InMemoryCallSessionStore(() => 1_000);
+  let session = store.updateAddress('dependencies', AddressSide.ORIGIN, {
+    postcode: '1030', city: 'Wien', street: 'Landstraßer Hauptstraße', houseNumber: '12',
+  });
+  session = store.updateAddress('dependencies', AddressSide.ORIGIN, { postcode: '4020' });
+  assert.deepEqual(session.origin, { postcode: '4020', status: 'COLLECTING', candidates: [] });
+  session = store.updateAddress('dependencies', AddressSide.ORIGIN, { city: 'Linz', street: 'Hauptplatz', houseNumber: '1' });
+  session = store.updateAddress('dependencies', AddressSide.ORIGIN, { city: 'Leonding' });
+  assert.deepEqual(session.origin, { postcode: '4020', city: 'Leonding', status: 'COLLECTING', candidates: [] });
 });
 
 test('valid city and address candidates can be selected only in their current context', () => {

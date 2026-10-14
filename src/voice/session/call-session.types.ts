@@ -18,6 +18,11 @@ export interface AddressCandidate {
   readonly kind: CandidateKind;
   readonly city?: string;
   readonly postcode?: string;
+  readonly street?: string;
+  readonly locality?: string;
+  readonly municipalityKey?: string;
+  readonly localityKey?: string;
+  readonly streetKey?: string;
 }
 
 export interface ResolvedLocation {
@@ -30,7 +35,11 @@ export interface ResolvedLocation {
 export interface AddressState {
   readonly postcode?: string;
   readonly city?: string;
+  readonly locality?: string;
+  readonly municipalityKey?: string;
+  readonly localityKey?: string;
   readonly street?: string;
+  readonly streetKey?: string;
   readonly houseNumber?: string;
   readonly status: ResolutionStatus;
   readonly candidates: AddressCandidate[];
@@ -38,7 +47,7 @@ export interface AddressState {
 }
 
 export interface CallSession {
-  readonly callId: string;
+  readonly sessionId: string;
   readonly origin: AddressState;
   readonly destination: AddressState;
   readonly requestedTime?: string;
@@ -49,7 +58,11 @@ export interface CallSession {
 export interface AddressPatch {
   readonly postcode?: string;
   readonly city?: string;
+  readonly locality?: string;
+  readonly municipalityKey?: string;
+  readonly localityKey?: string;
   readonly street?: string;
+  readonly streetKey?: string;
   readonly houseNumber?: string;
 }
 
@@ -64,14 +77,17 @@ export type VoiceStatus =
 
 export interface VoiceApiResponse<T = unknown> {
   readonly status: VoiceStatus;
-  readonly callId: string;
+  readonly sessionId: string;
   readonly side?: AddressSide;
   readonly data?: T;
   readonly candidates?: PublicAddressCandidate[];
   readonly clarificationQuestion?: string;
 }
 
-export type PublicAddressCandidate = Omit<AddressCandidate, 'kind' | 'city' | 'postcode'>;
+export type PublicAddressCandidate = Omit<
+  AddressCandidate,
+  'kind' | 'city' | 'postcode' | 'street' | 'locality' | 'municipalityKey' | 'localityKey' | 'streetKey'
+>;
 
 export function publicCandidate(candidate: AddressCandidate): PublicAddressCandidate {
   return {
