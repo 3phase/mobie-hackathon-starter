@@ -124,3 +124,39 @@ test('logging out removes access, status remains key-protected, and unlisted end
   await request(app.getHttpServer()).get('/api/me').set('Authorization', authorization).expect(401, { error: 'Login required. Open the starter and sign in again.' });
   await request(app.getHttpServer()).get('/api/admin/users').set('Authorization', authorization).expect(404, { error: 'Endpoint not found. See docs/api.md.' });
 });
+
+test('address receipt works without upstream login and can be inspected only with the team key', async (t) => {
+  const { app, writes } = await fixture(t);
+  const query = 'Villagarten vier, Steyregg';
+  await request(app.getHttpServer()).get('/api/addresses/received').expect(401);
+  await request(app.getHttpServer()).post('/api/addresses/receive').send({ query }).expect(401);
+  const response = await request(app.getHttpServer())
+    .post('/api/addresses/receive')
+    .set('Authorization', authorization)
+    .send({ query })
+    .expect(200);
+  assert.equal(response.body.received, true);
+  assert.equal(response.body.query, query);
+  assert.ok(Number.isFinite(Date.parse(response.body.receivedAt)));
+  const history = await request(app.getHttpServer())
+    .get('/api/addresses/received')
+    .set('Authorization', authorization)
+    .expect(200);
+  assert.deepEqual(history.body.receipts, [{ id: response.body.id, query, receivedAt: response.body.receivedAt }]);
+  await request(app.getHttpServer())
+    .post('/api/addresses/receive')
+    .set('Authorization', authorization)
+    .send({ query: ' ' })
+    .expect(400);
+  const afterInvalid = await request(app.getHttpServer())
+    .get('/api/addresses/received')
+    .set('Authorization', authorization)
+    .expect(200);
+  assert.equal(afterInvalid.body.receipts.length, 1);
+  assert.equal(writes(), 0);
+  const status = await request(app.getHttpServer())
+    .get('/api/status')
+    .set('Authorization', authorization)
+    .expect(200);
+  assert.equal(status.body.authenticated, false);
+});

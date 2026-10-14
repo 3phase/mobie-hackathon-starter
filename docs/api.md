@@ -169,6 +169,8 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `GET /api/status` | Login state and access-token expiry; never the tokens |
 | `POST /api/logout` | Clears this process's login |
 | `GET /api/me` | Proxies mobie `/me` |
+| `POST /api/addresses/receive` | `{ "query": "spoken address" }`; immediately acknowledges receipt without calling Mapbox or mobie |
+| `GET /api/addresses/received` | Returns the newest 20 in-memory address receipts; team key required, no passenger login needed |
 | `POST /api/locations/search` | `{ "query": "Stephansplatz 1, Wien" }`; returns `{ "candidates": [...], "attribution": "..." }` |
 | `POST /api/rides/search` | Same basic location/time/seat payload as mobie |
 | `POST /api/rides/{rideId}/join-detailed` | Same basic payload **plus `confirmed: true`** |

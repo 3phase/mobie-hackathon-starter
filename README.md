@@ -4,6 +4,8 @@ A NestJS and TypeScript starter for a German-speaking phone assistant that finds
 
 This is still a single-user hackathon service: **one running process represents one staging passenger**. Tokens live only in memory, all callers use that passenger, and a restart requires login again. A submitted booking remains pending until the driver approves it.
 
+Team specifications, architecture, package guides and implementation plans are in the [project documentation index](docs/README.md). The [architecture deck](docs/architecture/mobie-architecture-slides.html) describes our Fonio integration and the passenger and driver processes. Open the HTML deck locally in a browser.
+
 ## Requirements and setup
 
 - Node.js 22 or newer (Node.js 24 LTS recommended)
@@ -90,6 +92,8 @@ No global prefix is used.
 | POST | `/api/logout` | Team Bearer key | Clear in-memory credentials |
 | GET | `/api/status` | Team Bearer key | Login state and access-token expiry, never tokens |
 | GET | `/api/me` | Team Bearer key + login | Proxy mobie `/me` |
+| POST | `/api/addresses/receive` | Team Bearer key | Store a spoken-address receipt without Mapbox or mobie login |
+| GET | `/api/addresses/received` | Team Bearer key | Return the newest 20 in-memory address receipts |
 | POST | `/api/locations/search` | Team Bearer key | Resolve an Austrian address with Mapbox |
 | POST | `/api/rides/search` | Team Bearer key + login | Search rides using resolved locations |
 | POST | `/api/rides/:id/join-detailed` | Team Bearer key + login + `confirmed: true` | Submit one booking request after consent |
