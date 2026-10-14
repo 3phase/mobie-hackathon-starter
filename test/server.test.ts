@@ -17,6 +17,11 @@ const payload = {
   departure: { latitude: 48.2, longitude: 16.3 }, destination: { latitude: 48.3, longitude: 16.4 },
   time: '2026-10-20T09:00:00+02:00', seatsRequested: 1,
 };
+const rideSearchResponse = [{
+  ride: { id: 'ride-1', time: '2026-10-15T16:00:00Z' },
+  driver: { id: 'driver-1', firstName: 'Alex', lastName: 'Beispiel' },
+  pickupEta: '2026-10-15T16:05:00Z',
+}];
 const config: AppConfig = {
   apiKey: key, issuer: 'https://auth.example', clientId: 'client', audience: 'https://staging.example',
   redirectUri: 'http://localhost:3000/callback', baseUrl: 'https://staging.example', mapboxToken: 'mapbox-token',
@@ -39,7 +44,7 @@ async function fixture(t: test.TestContext): Promise<{ app: INestApplication; wr
       assert.equal((JSON.parse(init?.body as string) as Record<string, unknown>).confirmed, undefined);
       return Response.json({ rideRequest: { id: 'request-1', status: 'PENDING' }, suggestions: [] });
     }
-    if (url.endsWith('/rides/search')) return Response.json([{ ride: { id: 'ride-1' } }]);
+    if (url.endsWith('/rides/search')) return Response.json(rideSearchResponse);
     return Response.json({ id: 'user-1' });
   };
 
@@ -98,7 +103,7 @@ test('search-to-booking flow requires confirmation and preserves the PENDING res
   const { app, writes } = await fixture(t);
   await signIn(app);
   const search = await request(app.getHttpServer()).post('/api/rides/search').set('Authorization', authorization).send(payload).expect(200);
-  assert.deepEqual(search.body, [{ ride: { id: 'ride-1' } }]);
+  assert.deepEqual(search.body, rideSearchResponse);
   await request(app.getHttpServer()).post('/api/rides/ride-1/join-detailed').set('Authorization', authorization).send(payload).expect(400);
   assert.equal(writes(), 0);
   const booked = await request(app.getHttpServer()).post('/api/rides/ride-1/join-detailed').set('Authorization', authorization).send({ ...payload, confirmed: true }).expect(200);
@@ -161,7 +166,7 @@ test('address receipt works without upstream login and can be inspected only wit
   assert.equal(status.body.authenticated, false);
 });
 
-test('inbound trip strings flow through Mapbox and Mobie and the raw response is available to the frontend', async (t) => {
+test('inbound trip strings flow through Mapbox and Mobie and return a Fonio response', async (t) => {
   const { app } = await fixture(t);
   await signIn(app);
   const trip = {
@@ -175,13 +180,25 @@ test('inbound trip strings flow through Mapbox and Mobie and the raw response is
     .set('Authorization', authorization)
     .send(trip)
     .expect(200);
-  assert.deepEqual(search.body, [{ ride: { id: 'ride-1' } }]);
+  assert.deepEqual(search.body, {
+    status: 'ride_found',
+    rideDetails: {
+      rideId: 'ride-1',
+      driverName: 'Alex',
+      pickupTimeIsEstimated: true,
+    },
+    pickupAddress: 'Villagarten 4, 4221 Steyregg',
+    destinationAddress: 'Bethlehemstraße, 4020 Linz',
+    pickupTime: '2026-10-15T18:05:00+02:00',
+    message: 'Ich habe eine passende Fahrt mit Alex gefunden. Abholung ist voraussichtlich am 15. Oktober um 18:05 Uhr am Villagarten 4, 4221 Steyregg. Dein Ziel ist Bethlehemstraße, 4020 Linz. Soll ich diese Fahrt für dich anfragen?',
+  });
 
   const latest = await request(app.getHttpServer())
     .get('/api/trips/latest')
     .set('Authorization', authorization)
     .expect(200);
   assert.deepEqual(latest.body.result.response, search.body);
+  assert.deepEqual(latest.body.result.mobieResponse, rideSearchResponse);
   assert.deepEqual(latest.body.result.request, {
     departure: 'Villagarten 4, 4221 Steyregg',
     destination: 'Bethlehemstraße, 4020 Linz',

@@ -24,7 +24,7 @@ With the app and ngrok running, generate the full trip-search webhook values wit
 node --env-file=.env scripts/fonio-config.js
 ```
 
-The generated ignored `.local/fonio-trip-search.json` connects Fonio to `POST /api/trips/search`. The endpoint normalizes the extracted strings, resolves both addresses through Mapbox, sends the resulting coordinates to Mobie and returns Mobie's raw ride-search JSON. The browser shows the latest completed response after clicking **Refresh ride-search response**.
+The generated ignored `.local/fonio-trip-search.json` connects Fonio to `POST /api/trips/search`. The endpoint normalizes the extracted strings, resolves both addresses through Mapbox, sends the resulting coordinates to Mobie and returns the best-ranked suggestion in a stable Fonio response. The browser shows the latest completed response after clicking **Refresh ride-search response**.
 
 ## Main files
 

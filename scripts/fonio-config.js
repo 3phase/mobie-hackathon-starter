@@ -23,7 +23,7 @@ const config = {
     { name: 'seats_requested', type: 'String', description: 'Bestätigte Sitzplatzanzahl als ganze Zahl von 1 bis 8.' },
   ],
   execution_sentence: 'Ich suche jetzt nach passenden Fahrten.',
-  response_instructions: 'Die Antwort ist die unveränderte Mobie-Fahrtenliste. Wenn sie leer ist, sage, dass keine passende Fahrt gefunden wurde. Fasse sonst die passenden Fahrten zusammen. Diese Integration bucht keine Fahrt.',
+  response_instructions: 'Nutze das optionale Feld message als Antwort an die anrufende Person. rideDetails enthält die beste gefundene Fahrt; ohne rideDetails wurde keine passende Fahrt gefunden. Frage vor einer Buchungsanfrage immer ausdrücklich nach Bestätigung.',
 };
 
 await mkdir('.local', { recursive: true });

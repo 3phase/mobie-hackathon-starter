@@ -1,6 +1,6 @@
 # Fonio complete-flow configuration
 
-Configure one HTTP Request in the Fonio assistant to send a complete trip to the starter. The starter normalizes the strings, resolves both locations through Mapbox and returns the raw Mobie ride-search response. This integration searches but does not submit booking requests.
+Configure one HTTP Request in the Fonio assistant to send a complete trip to the starter. The starter normalizes the strings, resolves both locations through Mapbox and returns the best-ranked Mobie suggestion in a stable Fonio response. This integration searches but does not submit booking requests.
 
 ## Prerequisites
 
@@ -65,9 +65,26 @@ Set the execution sentence under **Advanced** to:
 
 ## Response behavior
 
-The response is Mobie's unmodified ride array. Include these instructions in the assistant's behavior without removing its existing instructions:
+The response has this shape. When Mobie returns no valid suggestion, `status` is `no_ride_found` and `rideDetails` is omitted, while the caller's normalized trip metadata remains present:
 
-> Die Antwort ist die unveränderte Mobie-Fahrtenliste. Wenn sie leer ist, sage, dass keine passende Fahrt gefunden wurde. Fasse sonst die passenden Fahrten zusammen. Diese Integration bucht keine Fahrt.
+```json
+{
+  "status": "ride_found",
+  "rideDetails": {
+    "rideId": "ride-example",
+    "driverName": "Alex",
+    "pickupTimeIsEstimated": true
+  },
+  "pickupAddress": "Villagarten 4, 4221 Steyregg",
+  "destinationAddress": "Bethlehemstraße, Linz",
+  "pickupTime": "2026-10-20T15:05:00+02:00",
+  "message": "Ich habe eine passende Fahrt mit Alex gefunden. ..."
+}
+```
+
+The first item in Mobie's ranked array supplies `rideDetails`. `pickupEta` is used for `pickupTime` when present, converted to the `Europe/Vienna` offset, and `pickupTimeIsEstimated` is then `true`. Otherwise the requested time is retained and the flag is `false`. Include these instructions in the assistant's behavior without removing its existing instructions:
+
+> Nutze das optionale Feld `message` als Antwort an die anrufende Person. `rideDetails` enthält die beste gefundene Fahrt; ohne `rideDetails` wurde keine passende Fahrt gefunden. Frage vor einer Buchungsanfrage immer ausdrücklich nach Bestätigung.
 
 A custom variable is an AI extraction from the conversation. Its description does not guarantee an untouched speech recognition transcript.
 
@@ -75,7 +92,7 @@ A custom variable is an AI extraction from the conversation. Its description doe
 
 Say: “Ich möchte am 19. Oktober 2026 um 15 Uhr mit einem Sitzplatz von Villagarten vier, 4221 Steyregg, zur Bethlehemstraße in 4020 Linz fahren.”
 
-Check that Fonio invokes the tool with all four fields and that the response is a Mobie ride array. Open the starter frontend and click **Refresh ride-search response** to inspect the same raw response.
+Check that Fonio invokes the tool with all four fields and that the response contains the normalized trip metadata plus `rideDetails` for the best-ranked match. Open the starter frontend and click **Refresh ride-search response** to inspect the same Fonio response.
 
 If the ngrok public URL changes, update the tool URL in Fonio. An HTTP 401 from the starter indicates an incorrect team key or missing Mobie passenger login.
 

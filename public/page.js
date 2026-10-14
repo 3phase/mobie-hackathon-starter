@@ -37,7 +37,7 @@ document.querySelector('#refresh-trip').addEventListener('click', async () => {
     const { result } = await request('/api/trips/latest');
     output.textContent = result ? JSON.stringify(result.response, null, 2) : '';
     status.textContent = result
-      ? `Mobie response received ${new Date(result.receivedAt).toLocaleString('de-AT', { timeZone: 'Europe/Vienna' })}.`
+      ? `Fonio response created ${new Date(result.receivedAt).toLocaleString('de-AT', { timeZone: 'Europe/Vienna' })}.`
       : 'No completed trip search received yet.';
   } catch (error) {
     output.textContent = '';

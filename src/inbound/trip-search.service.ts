@@ -6,6 +6,7 @@ import type { LocationCandidate } from '../mapbox/mapbox.types.js';
 import { MobieService } from '../mobie/mobie.service.js';
 import { StringProcessingService } from '../string-processing/string-processing.service.js';
 import type { TripSearchStrings } from '../string-processing/string-processing.types.js';
+import { fonioTripSearchResponse, type FonioTripSearchResponse } from './fonio-trip-search-response.js';
 
 export interface TripSearchRecord {
   readonly id: string;
@@ -20,7 +21,8 @@ export interface TripSearchRecord {
     readonly departure: LocationCandidate;
     readonly destination: LocationCandidate;
   };
-  readonly response: unknown;
+  readonly response: FonioTripSearchResponse;
+  readonly mobieResponse: unknown;
 }
 
 @Injectable()
@@ -33,7 +35,7 @@ export class TripSearchService {
     @Inject(MobieService) private readonly mobie: MobieService,
   ) { }
 
-  public async search(input: TripSearchStrings): Promise<unknown> {
+  public async search(input: TripSearchStrings): Promise<FonioTripSearchResponse> {
     const request = this.strings.processTripSearch(input);
     const [departureSearch, destinationSearch] = await Promise.all([
       this.mapbox.searchLocations(request.departure),
@@ -45,18 +47,20 @@ export class TripSearchService {
     if (!departure) throw new HttpError(404, `No Mapbox candidate found for departure: ${request.departure}`);
     if (!destination) throw new HttpError(404, `No Mapbox candidate found for destination: ${request.destination}`);
 
-    const response = await this.mobie.searchRides({
+    const mobieResponse = await this.mobie.searchRides({
       departure,
       destination,
       time: request.time,
       seatsRequested: request.seatsRequested,
     });
+    const response = fonioTripSearchResponse(mobieResponse, request);
     this.records.unshift({
       id: randomUUID(),
       receivedAt: new Date().toISOString(),
       request,
       resolved: { departure, destination },
       response,
+      mobieResponse,
     });
     if (this.records.length > 20) this.records.pop();
     return response;

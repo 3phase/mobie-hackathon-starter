@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Inject, Post, UseGuards } from '@nestjs/common';
 import { JsonContentTypeGuard } from '../common/guards/json-content-type.guard.js';
 import { TripSearchDto } from './dto/trip-search.dto.js';
+import type { FonioTripSearchResponse } from './fonio-trip-search-response.js';
 import { TripSearchService } from './trip-search.service.js';
 
 @Controller('api/trips')
@@ -10,7 +11,7 @@ export class TripSearchController {
   @Post('search')
   @HttpCode(200)
   @UseGuards(JsonContentTypeGuard)
-  public search(@Body() body: TripSearchDto) {
+  public search(@Body() body: TripSearchDto): Promise<FonioTripSearchResponse> {
     return this.trips.search(body);
   }
 

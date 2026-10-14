@@ -171,8 +171,8 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `GET /api/me` | Proxies mobie `/me` |
 | `POST /api/addresses/receive` | `{ "query": "spoken address" }`; immediately acknowledges receipt without calling Mapbox or mobie |
 | `GET /api/addresses/received` | Returns the newest 20 in-memory address receipts; team key required, no passenger login needed |
-| `POST /api/trips/search` | String fields `departure`, `destination`, `time`, `seatsRequested`; normalizes, geocodes both locations and returns the raw Mobie ride-search response |
-| `GET /api/trips/latest` | Latest completed trip flow, including input, resolved locations and raw Mobie response; used by the browser |
+| `POST /api/trips/search` | String fields `departure`, `destination`, `time`, `seatsRequested`; normalizes and geocodes both locations, then returns a stable Fonio response containing the best-ranked ride |
+| `GET /api/trips/latest` | Latest completed trip flow, including input, resolved locations, the Fonio response and the raw response under `mobieResponse`; used by the browser |
 | `POST /api/locations/search` | `{ "query": "Stephansplatz 1, Wien" }`; returns `{ "candidates": [...], "attribution": "..." }` |
 | `POST /api/rides/search` | Same basic location/time/seat payload as mobie |
 | `POST /api/rides/{rideId}/join-detailed` | Same basic payload **plus `confirmed: true`** |
@@ -193,6 +193,25 @@ The end-to-end search endpoint accepts a Fonio-friendly body:
 ```
 
 Whitespace is normalized and a numeric seat string is converted to a number. A timezone-less `time` is interpreted in `Europe/Vienna` and receives the date-appropriate offset before it is sent to Mobie. Mapbox's first candidate for each address is sent to Mobie; callers should therefore provide street, house number, postcode and municipality to avoid ambiguity. The endpoint searches only and never books a ride.
+
+It returns the caller metadata together with the first, best-ranked Mobie suggestion:
+
+```json
+{
+  "status": "ride_found",
+  "rideDetails": {
+    "rideId": "ride-example",
+    "driverName": "Alex",
+    "pickupTimeIsEstimated": true
+  },
+  "pickupAddress": "Villagarten 4, 4221 Steyregg",
+  "destinationAddress": "Bethlehemstraße, 4020 Linz",
+  "pickupTime": "2026-10-20T15:05:00+02:00",
+  "message": "Ich habe eine passende Fahrt mit Alex gefunden. ..."
+}
+```
+
+`rideDetails` is omitted and `status` is `no_ride_found` if the Mobie array is empty or its first entry has no ride ID. Otherwise, `status` is `ride_found`. `pickupTime` uses Mobie's `pickupEta`, converted to the Vienna offset, when available; otherwise it retains the requested time. The optional German `message` is ready for Fonio to speak.
 
 The starter only forwards its explicitly listed routes and fields, not arbitrary URLs or administrative APIs. Request bodies are limited to 16 KiB. Its own errors use `{ "error": "..." }` (400 invalid payload/consent, 401 missing key/login, 404 route, 413 size, 415 content type, 502 upstream network/JSON issue, 503 missing Mapbox token). A timeout may have an unknown write outcome.
 
