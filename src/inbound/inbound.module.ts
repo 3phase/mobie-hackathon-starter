@@ -6,7 +6,12 @@ import { NotFoundController } from './not-found.controller.js';
 import { StaticController } from './static.controller.js';
 
 @Module({
-  controllers: [HealthController, StaticController, AddressReceiptController, NotFoundController],
+  controllers: [
+    HealthController,
+    StaticController,
+    AddressReceiptController,
+    NotFoundController
+  ],
   providers: [AddressReceiptService],
 })
-export class InboundModule {}
+export class InboundModule { }

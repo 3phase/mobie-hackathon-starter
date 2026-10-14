@@ -59,7 +59,7 @@ export class MapboxClient {
       language: 'de',
       limit: '5',
       autocomplete: 'false',
-      permanent: 'true',
+      permanent: 'false',
     }).toString();
 
     const result = await this.http.requestJson(url.toString(), {}, 'Mapbox');
