@@ -6,9 +6,11 @@ import { CommonModule } from './common/common.module.js';
 import { ApiKeyGuard } from './common/guards/api-key.guard.js';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware.js';
 import { InboundModule } from './inbound/inbound.module.js';
+import { NotFoundModule } from './inbound/not-found.module.js';
 import { MapboxModule } from './mapbox/mapbox.module.js';
 import { MobieModule } from './mobie/mobie.module.js';
 import { StringProcessingModule } from './string-processing/string-processing.module.js';
+import { VoiceModule } from './voice/voice.module.js';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { StringProcessingModule } from './string-processing/string-processing.mo
     MobieModule,
     StringProcessingModule,
     InboundModule,
+    VoiceModule,
+    NotFoundModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ApiKeyGuard }],
 })

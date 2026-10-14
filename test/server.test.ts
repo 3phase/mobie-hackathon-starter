@@ -249,3 +249,74 @@ test('trip join requires a string ID from a recent completed search', async (t) 
     .expect(404, { error: 'Trip not found in recent searches. Search for the trip before joining it.' });
   assert.equal(writes(), 0);
 });
+
+test('voice routes collect independent addresses, reject stale choices, search rides and reuse booking', async (t) => {
+  const { app, writes } = await fixture(t);
+  await signIn(app);
+  const server = app.getHttpServer();
+  const headers = { Authorization: authorization };
+  const callId = 'fonio-call-123';
+
+  const originPostcode = await request(server)
+    .post('/api/voice/postcodes/search').set(headers)
+    .send({ callId, side: 'origin', postcode: ' 1030 ' }).expect(200);
+  assert.equal(originPostcode.body.data.postcode, '1030');
+  assert.equal(originPostcode.body.status, 'NEEDS_CONFIRMATION');
+
+  const originCity = await request(server)
+    .post('/api/voice/cities/search').set(headers)
+    .send({ callId, side: 'origin', city: 'Wien' }).expect(200);
+  const staleCityId = originPostcode.body.candidates[0].id as string;
+  await request(server)
+    .post('/api/voice/cities/confirm').set(headers)
+    .send({ callId, side: 'origin', candidateId: staleCityId })
+    .expect(200, {
+      status: 'INVALID_CONTEXT', callId, side: 'origin',
+      clarificationQuestion: 'That candidate is invalid or stale. Search again before selecting an option.',
+    });
+  await request(server)
+    .post('/api/voice/cities/confirm').set(headers)
+    .send({ callId, side: 'origin', candidateId: originCity.body.candidates[0].id }).expect(200);
+
+  const originAddress = await request(server)
+    .post('/api/voice/addresses/search').set(headers)
+    .send({ callId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
+  await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({ callId, side: 'origin', candidateId: originAddress.body.candidates[0].id }).expect(200);
+
+  const unresolved = await request(server)
+    .post('/api/voice/rides/search').set(headers)
+    .send({ callId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+  assert.deepEqual(unresolved.body.data.unresolved, ['destination']);
+
+  const destinationCity = await request(server)
+    .post('/api/voice/cities/search').set(headers)
+    .send({ callId, side: 'destination', city: 'Linz' }).expect(200);
+  await request(server)
+    .post('/api/voice/cities/confirm').set(headers)
+    .send({ callId, side: 'destination', candidateId: destinationCity.body.candidates[0].id }).expect(200);
+  const destinationAddress = await request(server)
+    .post('/api/voice/addresses/search').set(headers)
+    .send({ callId, side: 'destination', street: 'Hauptplatz', houseNumber: '1' }).expect(200);
+  await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({ callId, side: 'destination', candidateId: destinationAddress.body.candidates[0].id }).expect(200);
+
+  const ride = await request(server)
+    .post('/api/voice/rides/search').set(headers)
+    .send({ callId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+  assert.equal(ride.body.status, 'RESOLVED');
+  assert.equal(ride.body.data.rideDetails.rideId, 'ride-1');
+  await request(server).post('/ride/join').set(headers).send({ rideId: 'ride-1' }).expect(200);
+  assert.equal(writes(), 1);
+
+  await request(server)
+    .post('/api/voice/sessions/end').set(headers).send({ callId }).expect(200, {
+      status: 'RESOLVED', callId, data: { deleted: true },
+    });
+  const expired = await request(server)
+    .post('/api/voice/rides/search').set(headers)
+    .send({ callId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+  assert.equal(expired.body.status, 'INVALID_CONTEXT');
+});

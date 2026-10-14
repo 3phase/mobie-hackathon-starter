@@ -5,7 +5,6 @@ import { StringProcessingModule } from '../string-processing/string-processing.m
 import { AddressReceiptController } from './address-receipt.controller.js';
 import { AddressReceiptService } from './address-receipt.service.js';
 import { HealthController } from './health.controller.js';
-import { NotFoundController } from './not-found.controller.js';
 import { StaticController } from './static.controller.js';
 import { TripSearchController } from './trip-search.controller.js';
 import { TripSearchService } from './trip-search.service.js';
@@ -17,8 +16,8 @@ import { TripSearchService } from './trip-search.service.js';
     StaticController,
     AddressReceiptController,
     TripSearchController,
-    NotFoundController
   ],
   providers: [AddressReceiptService, TripSearchService],
+  exports: [TripSearchService],
 })
 export class InboundModule { }

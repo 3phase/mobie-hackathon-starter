@@ -25,6 +25,13 @@ export interface TripSearchRecord {
   readonly mobieResponse: unknown;
 }
 
+export interface ResolvedTripSearchInput {
+  readonly departure: LocationCandidate;
+  readonly destination: LocationCandidate;
+  readonly time: unknown;
+  readonly seatsRequested?: unknown;
+}
+
 @Injectable()
 export class TripSearchService {
   private readonly records: TripSearchRecord[] = [];
@@ -47,6 +54,24 @@ export class TripSearchService {
     if (!departure) throw new HttpError(404, `No Mapbox candidate found for departure: ${request.departure}`);
     if (!destination) throw new HttpError(404, `No Mapbox candidate found for destination: ${request.destination}`);
 
+    return this.searchMobie(request, departure, destination);
+  }
+
+  public searchResolved(input: ResolvedTripSearchInput): Promise<FonioTripSearchResponse> {
+    const request = this.strings.processTripSearch({
+      departure: input.departure.addressLine || input.departure.publicName,
+      destination: input.destination.addressLine || input.destination.publicName,
+      time: input.time,
+      ...(input.seatsRequested === undefined ? {} : { seatsRequested: input.seatsRequested }),
+    });
+    return this.searchMobie(request, input.departure, input.destination);
+  }
+
+  private async searchMobie(
+    request: ReturnType<StringProcessingService['processTripSearch']>,
+    departure: LocationCandidate,
+    destination: LocationCandidate,
+  ): Promise<FonioTripSearchResponse> {
     const mobieResponse = await this.mobie.searchRides({
       departure,
       destination,
