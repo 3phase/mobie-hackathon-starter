@@ -23,6 +23,13 @@
 <ul id="received-addresses"></ul>
 <p>The latest 20 addresses are kept in memory. Restarting the server clears this list.</p>
 </section>
+<section aria-labelledby="trip-heading">
+<h2 id="trip-heading">Latest Mobie ride-search response</h2>
+<p>After Fonio sends a complete trip, refresh to see the raw JSON returned by Mobie.</p>
+<button type="button" id="refresh-trip">Refresh ride-search response</button>
+<p id="trip-status" role="status" aria-live="polite"></p>
+<pre id="trip-result"></pre>
+</section>
 <p>See the README and docs/api.md in your repository for documentation and example requests.</p>
 <p>Tokens stay in memory. You must sign in again after restarting the server.</p>
 </main>

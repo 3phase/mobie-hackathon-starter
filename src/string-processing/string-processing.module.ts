@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { StringProcessingService } from './string-processing.service.js';
 
-// Architectural boundary for future address normalization and matching.
-// It intentionally has no placeholder providers until that functionality exists.
-@Module({})
+@Module({
+  providers: [StringProcessingService],
+  exports: [StringProcessingService],
+})
 export class StringProcessingModule {}

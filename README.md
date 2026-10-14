@@ -58,14 +58,14 @@ src/
 ├── main.ts                    # production entry point
 ├── bootstrap.ts               # Express adapter, body limit, validation, filters, timeouts
 ├── app.module.ts              # application composition
-├── inbound/                   # health, static frontend, fallback routing
+├── inbound/                   # HTTP entry points and trip-flow orchestration
 ├── auth/                      # Auth0 PKCE, callback, token lifecycle
 ├── mapbox/                    # geocoding controller, service, and provider client
 ├── mobie/                     # ride controllers, validation, service, and provider client
-├── string-processing/         # clean boundary reserved for future matching work
+├── string-processing/         # inbound trip normalization and validation
 ├── config/                    # typed and validated environment configuration
 └── common/                    # reusable guards, filters, middleware, HTTP client, runtime tokens
-public/                        # unchanged browser login frontend
+public/                        # browser login and latest Mobie response view
 test/                          # unit and endpoint compatibility tests
 ```
 
@@ -73,7 +73,7 @@ test/                          # unit and endpoint compatibility tests
 - **Auth** owns OAuth2 Authorization Code + PKCE, state/cookie binding, code exchange, in-memory tokens, serialized rotation, login status, and logout.
 - **Mapbox** validates location queries, encapsulates Geocoding v6, safely narrows untrusted responses, and maps candidates without treating Mapbox feature IDs as mobie IDs.
 - **Mobie** validates ride payloads, obtains the current user access token, and encapsulates `/me`, search, detail, and join requests.
-- **String processing** is intentionally an empty module boundary. Add normalization or fuzzy matching only when there is real behavior to implement.
+- **String processing** trims and validates Fonio's trip strings and converts its numeric seat string before any provider call. More advanced fuzzy matching can be added at this boundary.
 - **Common** contains only cross-cutting concerns: constant-time API-key checks, the `{ "error": "..." }` exception boundary, security headers, and the timeout-limited upstream JSON client.
 
 Controllers deal only with transport concerns. Services enforce application rules. External calls live in clients/providers and return `unknown` until checked at the trust boundary. Dependencies use explicit Nest injection tokens, which keeps provider calls replaceable in tests.
@@ -94,6 +94,8 @@ No global prefix is used.
 | GET | `/api/me` | Team Bearer key + login | Proxy mobie `/me` |
 | POST | `/api/addresses/receive` | Team Bearer key | Store a spoken-address receipt without Mapbox or mobie login |
 | GET | `/api/addresses/received` | Team Bearer key | Return the newest 20 in-memory address receipts |
+| POST | `/api/trips/search` | Team Bearer key + login | Normalize inbound trip strings, resolve both locations and search Mobie |
+| GET | `/api/trips/latest` | Team Bearer key | Return the latest completed flow for the browser |
 | POST | `/api/locations/search` | Team Bearer key | Resolve an Austrian address with Mapbox |
 | POST | `/api/rides/search` | Team Bearer key + login | Search rides using resolved locations |
 | POST | `/api/rides/:id/join-detailed` | Team Bearer key + login + `confirmed: true` | Submit one booking request after consent |
@@ -122,7 +124,7 @@ For a new inbound capability, add a focused Nest module with a thin controller a
 
 For a provider integration, keep credentials in validated configuration, place network details in a dedicated injectable client, reuse `UpstreamHttpClient` for the 15-second timeout and sanitized errors, treat parsed JSON as `unknown`, and narrow it before use. Add mocked unit and HTTP tests; automated tests must not require live credentials or create staging writes.
 
-Fonio and street-name matching are deliberately not implemented. Their future code belongs in a new provider under `inbound/` and real services under `string-processing/`, respectively, without changing the existing public contract.
+The complete inbound search flow lives at `POST /api/trips/search`. It accepts `departure`, `destination`, `time` and `seatsRequested` as strings from Fonio, normalizes them in `string-processing/`, resolves both addresses through Mapbox and passes the selected coordinates to Mobie. More advanced street-name matching and ambiguity handling can be added inside the same processing boundary.
 
 ## Operational limits
 

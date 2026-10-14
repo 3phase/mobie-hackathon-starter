@@ -18,15 +18,24 @@ Configure `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_AUDIENCE` and `STARTER_API_K
 
 To make the local API reachable from Fonio, run `ngrok http 3000` in another terminal after completing ngrok setup. The browser callback can remain local. Add the team key as the Fonio API tool's Bearer credential.
 
+With the app and ngrok running, generate the full trip-search webhook values with:
+
+```powershell
+node --env-file=.env scripts/fonio-config.js
+```
+
+The generated ignored `.local/fonio-trip-search.json` connects Fonio to `POST /api/trips/search`. The endpoint normalizes the extracted strings, resolves both addresses through Mapbox, sends the resulting coordinates to Mobie and returns Mobie's raw ride-search JSON. The browser shows the latest completed response after clicking **Refresh ride-search response**.
+
 ## Main files
 
 | File | Responsibility |
 | --- | --- |
 | [src/auth](../../src/auth) | Auth0 PKCE login and serialized rotating token refresh. |
 | [src/config](../../src/config) | Environment configuration and validation. |
-| [src/inbound](../../src/inbound) | Public routes and protected address-receipt endpoints. |
+| [src/inbound](../../src/inbound) | Public routes, protected inbound endpoints and trip-flow orchestration. |
 | [src/mapbox](../../src/mapbox) | Address lookup and candidate coordinates. |
 | [src/mobie](../../src/mobie) | Staging ride searches and confirmed booking requests. |
+| [src/string-processing](../../src/string-processing) | Fonio trip-string normalization and validation. |
 
 ## Reference
 
@@ -40,4 +49,4 @@ To make the local API reachable from Fonio, run `ngrok http 3000` in another ter
 
 Run `npm test` inside the package. Tests use controlled responses and do not establish live phone or staging readiness.
 
-The starter has no caller-number identity matching or per-call state store. A booking request requires `confirmed: true` and remains pending until the driver approves it. The custom address matcher and Fonio integration are proposed additions. Fonio is selected, but account setup and live tool calls remain to be verified.
+The starter has no caller-number identity matching or per-call state store. A booking request requires `confirmed: true` and remains pending until the driver approves it. The inbound search flow selects Mapbox's first candidate, so Fonio must supply complete, confirmed addresses; custom fuzzy matching and ambiguity scoring remain future work. Live Fonio calls still require dashboard setup, a public tunnel and valid service credentials.

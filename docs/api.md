@@ -171,6 +171,8 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `GET /api/me` | Proxies mobie `/me` |
 | `POST /api/addresses/receive` | `{ "query": "spoken address" }`; immediately acknowledges receipt without calling Mapbox or mobie |
 | `GET /api/addresses/received` | Returns the newest 20 in-memory address receipts; team key required, no passenger login needed |
+| `POST /api/trips/search` | String fields `departure`, `destination`, `time`, `seatsRequested`; normalizes, geocodes both locations and returns the raw Mobie ride-search response |
+| `GET /api/trips/latest` | Latest completed trip flow, including input, resolved locations and raw Mobie response; used by the browser |
 | `POST /api/locations/search` | `{ "query": "Stephansplatz 1, Wien" }`; returns `{ "candidates": [...], "attribution": "..." }` |
 | `POST /api/rides/search` | Same basic location/time/seat payload as mobie |
 | `POST /api/rides/{rideId}/join-detailed` | Same basic payload **plus `confirmed: true`** |
@@ -178,6 +180,19 @@ These run on **your server**, not on mobie. Use `Authorization: Bearer <STARTER_
 | `GET /api/rides/{rideId}/rider-detail` | Proxies approved-passenger details |
 
 The `confirmed` boolean must reflect actual spoken consent; setting it automatically defeats its purpose. This starter does not prove consent cryptographically or persist call state. No automatic retries are performed for writes.
+
+The end-to-end search endpoint accepts a Fonio-friendly body:
+
+```json
+{
+  "departure": "Villagarten 4, 4221 Steyregg",
+  "destination": "Bethlehemstraße, 4020 Linz",
+  "time": "2026-10-19T15:00:00+02:00",
+  "seatsRequested": "1"
+}
+```
+
+Whitespace is normalized and a numeric seat string is converted to a number. `time` must already contain an ISO-8601 timezone. Mapbox's first candidate for each address is sent to Mobie; callers should therefore provide street, house number, postcode and municipality to avoid ambiguity. The endpoint searches only and never books a ride.
 
 The starter only forwards its explicitly listed routes and fields, not arbitrary URLs or administrative APIs. Request bodies are limited to 16 KiB. Its own errors use `{ "error": "..." }` (400 invalid payload/consent, 401 missing key/login, 404 route, 413 size, 415 content type, 502 upstream network/JSON issue, 503 missing Mapbox token). A timeout may have an unknown write outcome.
 

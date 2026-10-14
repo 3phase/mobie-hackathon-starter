@@ -160,3 +160,34 @@ test('address receipt works without upstream login and can be inspected only wit
     .expect(200);
   assert.equal(status.body.authenticated, false);
 });
+
+test('inbound trip strings flow through Mapbox and Mobie and the raw response is available to the frontend', async (t) => {
+  const { app } = await fixture(t);
+  await signIn(app);
+  const trip = {
+    departure: ' Villagarten   4, 4221 Steyregg ',
+    destination: ' Bethlehemstraße, 4020 Linz ',
+    time: '2026-10-19T15:00:00+02:00',
+    seatsRequested: '1',
+  };
+  const search = await request(app.getHttpServer())
+    .post('/api/trips/search')
+    .set('Authorization', authorization)
+    .send(trip)
+    .expect(200);
+  assert.deepEqual(search.body, [{ ride: { id: 'ride-1' } }]);
+
+  const latest = await request(app.getHttpServer())
+    .get('/api/trips/latest')
+    .set('Authorization', authorization)
+    .expect(200);
+  assert.deepEqual(latest.body.result.response, search.body);
+  assert.deepEqual(latest.body.result.request, {
+    departure: 'Villagarten 4, 4221 Steyregg',
+    destination: 'Bethlehemstraße, 4020 Linz',
+    time: trip.time,
+    seatsRequested: 1,
+  });
+  assert.equal(latest.body.result.resolved.departure.longitude, 16.3);
+  assert.equal(latest.body.result.resolved.destination.latitude, 48.2);
+});

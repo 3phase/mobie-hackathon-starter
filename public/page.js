@@ -30,6 +30,20 @@ document.querySelector('#refresh-addresses').addEventListener('click', async () 
     status.textContent = error.message;
   }
 });
+document.querySelector('#refresh-trip').addEventListener('click', async () => {
+  const status = document.querySelector('#trip-status');
+  const output = document.querySelector('#trip-result');
+  try {
+    const { result } = await request('/api/trips/latest');
+    output.textContent = result ? JSON.stringify(result.response, null, 2) : '';
+    status.textContent = result
+      ? `Mobie response received ${new Date(result.receivedAt).toLocaleString('de-AT', { timeZone: 'Europe/Vienna' })}.`
+      : 'No completed trip search received yet.';
+  } catch (error) {
+    output.textContent = '';
+    status.textContent = error.message;
+  }
+});
 document.querySelector('#login-form').addEventListener('submit', async event => {
   event.preventDefault();
   try {

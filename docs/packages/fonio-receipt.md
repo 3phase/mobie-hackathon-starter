@@ -43,12 +43,4 @@ The authenticated `GET /api/addresses/received` endpoint returns the same receip
 
 The POST response immediately returns HTTP 200 with `received: true`, the received address, receipt ID, timestamp and a German acknowledgement. Empty strings and strings over 256 characters return HTTP 400. Both endpoints require the starter team key.
 
-## Generate the settings
-
-With the app and ngrok running, execute from the repository root:
-
-```powershell
-node --env-file=.env scripts/fonio-config.js
-```
-
-The resulting ignored `.local/fonio-address-receive.json` contains the live URL and authorization header. To generate the later Mapbox lookup configuration, add `--lookup`.
+The address-only receipt endpoint remains available for isolated diagnostics, but the configuration generator always creates the complete trip-search flow.
