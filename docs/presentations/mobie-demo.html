@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Seven-slide mobie voice ride booking demo by The Senior Association of mobie Users: use case, problem, architecture, guided address search and planned Levenshtein matching.">
+<title>mobie — find a ride by phone</title>
+<style>
+:root{color-scheme:dark;--bg:#1b2832;--outer:#142029;--ink:#e1e6e4;--body:#ccd5d8;--muted:#a5b3bc;--line:#3c4c57;--accent:#dfb17f;--green:#a6c7bc;--voice:#beb6db;--panel:#23343f}
+*{box-sizing:border-box}body{margin:0;background:var(--outer);color:var(--ink);font-family:Arial,Helvetica,sans-serif}button,select{font:inherit}button,select{color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px 12px}button{cursor:pointer}button:disabled{opacity:.35;cursor:default}a{color:var(--voice)}:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+.toolbar{height:56px;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid var(--line)}.brand{font-size:15px;letter-spacing:1.6px;color:var(--muted);margin-right:18px}.toolbar select{width:390px;min-width:0}.toolbar .space{flex:1}.toolbar button{font-size:13px}#viewport{height:calc(100dvh - 100px);width:100%;position:relative;overflow:hidden}#canvas{width:1600px;height:900px;background:var(--bg);position:absolute;transform-origin:top left}.slide{position:absolute;inset:0;display:none;padding:54px 64px 48px}.slide.active{display:block}.eyebrow{font-size:18px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin:0 0 22px}.slide h1{font-size:61px;line-height:1.08;letter-spacing:-1.8px;margin:0 0 17px;font-weight:700}.subtitle{font-size:27px;line-height:1.35;color:var(--muted);margin:0;max-width:1400px}.content{margin-top:40px}.slide p{color:var(--body)}.footer{position:absolute;bottom:28px;left:64px;right:64px;display:flex;justify-content:space-between;color:var(--muted);font-size:17px}.takeaway{border-top:1px solid var(--line);padding-top:23px;margin:28px 0 0;font-size:28px;line-height:1.35;color:var(--green)!important}.small{font-size:22px;line-height:1.4;color:var(--muted)!important}.speaker-notes{display:none}.controls{height:44px;display:flex;align-items:center;gap:14px;padding:0 24px;border-top:1px solid var(--line)}.controls button{padding:3px 12px}.count{font-size:13px;min-width:50px;text-align:center}.hint{font-size:12px;color:var(--muted);margin-left:auto}.progress{position:fixed;left:0;bottom:0;height:3px;background:var(--accent);transition:width .15s}.sr-only{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden}
+svg{display:block;width:100%;height:auto;font-family:Arial,Helvetica,sans-serif}.box{fill:var(--panel);stroke:#718795;stroke-width:1.6}.focus-box{fill:#28383f;stroke:var(--accent);stroke-width:2}.external-box{fill:var(--outer);stroke:#718795;stroke-width:1.5}.proposed{stroke:var(--voice);stroke-dasharray:7 5}.edge{stroke:#91a5b2;stroke-width:2;fill:none}.edge-accent{stroke:var(--accent)}.svg-title{fill:var(--ink);font-size:29px;font-weight:600}.svg-body{fill:var(--body);font-size:23px}.svg-small{fill:var(--muted);font-size:20px}.svg-label{fill:var(--accent);font-size:19px;letter-spacing:.5px}.svg-green{fill:var(--green)}
+.hero-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:70px;align-items:start}.hero h1{font-size:83px;line-height:1.02;max-width:980px;margin-bottom:26px}.hero .lead{font-size:31px;line-height:1.42;max-width:900px;margin:0}.spoken{border-left:3px solid var(--voice);padding:4px 0 4px 29px;margin:12px 0 0;color:var(--voice);font-size:30px;line-height:1.5}.spoken p{color:var(--voice);margin:0}.journey{margin-top:63px;height:182px}.trip-line{margin:31px 0 0;font-size:29px;line-height:1.45}.trip-line .arrow{color:var(--accent);padding:0 12px}.hero .takeaway{margin-top:30px;font-size:26px}
+.problem-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:46px;margin-top:55px}.problem-grid>div+div{border-left:1px solid var(--line);padding-left:36px}.case-no{font-size:43px;color:var(--accent);margin-bottom:25px}.problem-grid h2{font-size:33px;line-height:1.15;margin:0 0 24px}.problem-grid p{font-size:29px;line-height:1.4;margin:0}.problem-grid .example{color:var(--voice);font-size:24px;border-top:1px solid var(--line);padding-top:19px;margin-top:30px}.problem .takeaway{margin-top:57px;font-size:31px}
+.architecture .content{margin-top:27px}.architecture-diagram{height:478px}.implementation-strip{display:grid;grid-template-columns:1.1fr 1fr;gap:40px;border-top:1px solid var(--line);margin-top:15px;padding-top:18px}.implementation-strip p{font-size:24px;line-height:1.4;margin:0}.implementation-strip strong{color:var(--green);font-weight:500}.implementation-strip .planned strong{color:var(--voice)}
+dialog{width:min(860px,92vw);max-height:85dvh;overflow:auto;padding:28px 32px;border:1px solid #718795;border-radius:6px;background:var(--bg);color:var(--ink)}dialog::backdrop{background:#000a}dialog header{display:flex;justify-content:space-between;gap:20px;align-items:start}dialog h2{font-size:25px;margin:0 0 20px}dialog p,dialog li{font-size:17px;line-height:1.65;color:var(--body)}dialog a{overflow-wrap:anywhere}
+.problem .input-quote{font-size:36px;line-height:1.35;color:var(--voice)}.problem .input-quote strong{color:var(--accent);font-weight:500}.problem .result{padding:17px 0;border-top:1px solid var(--line)}.problem .result p{font-size:28px;line-height:1.3}.problem .result .result-detail{font-size:21px;margin-top:8px;color:var(--accent)}.problem .result.correct .result-detail{color:var(--green)}.problem .problem-grid .context-note{font-size:24px;color:var(--muted);margin-top:25px}.problem .takeaway{margin-top:37px}
+.problem .problem-grid .example-label{font-size:18px;line-height:1.2;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin:22px 0 10px}.problem .problem-grid .case-input{font-size:31px;line-height:1.35;color:var(--body)}.problem .problem-grid .case-output{font-size:31px;line-height:1.35;color:var(--voice)}.problem .problem-grid .guard{font-size:24px;line-height:1.4;color:var(--green);border-top:1px solid var(--line);padding-top:18px;margin-top:25px}
+.title-slide h1{font-size:94px;line-height:1.03;letter-spacing:-2.5px;margin-top:58px;margin-bottom:28px;max-width:1350px}.title-slide .title-subtitle{font-size:32px;line-height:1.4;color:var(--body);margin:0;max-width:1050px}.title-slide .team{border-top:1px solid var(--line);margin-top:70px;padding-top:29px}.title-slide .team-label{font-size:18px;text-transform:uppercase;letter-spacing:2px;color:var(--accent);margin:0 0 15px}.title-slide .team-name{font-size:43px;line-height:1.2;color:var(--voice);margin:0}
+@media(max-width:700px){.brand,.space,.hint{display:none}.toolbar{gap:6px;padding:0 9px}.toolbar select{width:80px;flex:1;font-size:12px}.toolbar button{font-size:11px;padding:7px 8px}.controls{padding:0 12px}}
+@page{size:1600px 900px;margin:0}@media print{body{background:var(--bg);print-color-adjust:exact;-webkit-print-color-adjust:exact}.toolbar,.controls,.progress,dialog{display:none!important}#viewport{height:auto;overflow:visible}#canvas{position:static;transform:none!important;width:1600px;height:auto}.slide{display:block!important;position:relative;width:1600px;height:900px;break-after:page;overflow:hidden}.slide:last-child{break-after:auto}.speaker-notes{display:none!important}}
+.guided-grid{display:grid;grid-template-columns:650px 1fr;gap:84px;margin-top:28px;align-items:start}.guided-grid h2{font-size:32px;line-height:1.2;margin:0 0 17px}.address-stages h2{text-align:center}.address-stages .funnel{height:410px}.staged .address-note{font-size:24px;color:var(--muted);margin:6px 0 0;text-align:center}.ride-stages{padding-top:10px}.ride-stages>div+div{border-top:1px solid var(--line);margin-top:31px;padding-top:29px}.ride-stages .question{font-size:31px;line-height:1.35;color:var(--voice);margin:0 0 17px}.ride-stages .explanation{font-size:26px;line-height:1.4;margin:0;max-width:680px}.staged .takeaway{font-size:28px;margin-top:27px}
+.problem .problem-grid{margin-top:35px}.problem .problem-grid .issue-number{font-size:21px;line-height:1;color:var(--accent);margin:0 0 16px}.problem .problem-grid h2{min-height:76px;margin-bottom:14px}.spelling-grid{display:grid;grid-template-columns:1fr 1fr;gap:90px;margin-top:42px}.spelling-example{border-right:1px solid var(--line);padding-right:55px}.spelling .example-label{font-size:19px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin:0 0 14px}.spelling .word-example{font-size:76px;line-height:1.1;letter-spacing:2px;margin:0 0 32px}.changed-letter{color:var(--accent);border-bottom:3px solid var(--accent)}.matched-letter{color:var(--green);border-bottom:3px solid var(--green)}.spelling .edit-summary{font-size:29px;line-height:1.35;margin:8px 0 15px}.spelling .edit-summary strong{color:var(--accent);font-weight:500}.spelling .example-caption{font-size:22px;line-height:1.4;color:var(--muted);margin:0}.matching-steps{list-style:none;margin:0;padding:0;counter-reset:match-step}.matching-steps li{position:relative;padding-left:55px;counter-increment:match-step}.matching-steps li:before{content:counter(match-step);position:absolute;left:0;top:0;font-size:31px;color:var(--accent)}.matching-steps li+li{margin-top:29px}.matching-steps h2{font-size:32px;line-height:1.2;margin:0 0 12px}.matching-steps p{font-size:26px;line-height:1.4;margin:0}.spelling .takeaway{font-size:28px;margin-top:35px}
+.team-grid{display:grid;grid-template-columns:572px 820px;gap:80px;margin-top:28px;align-items:center}.team-slide .association-name{font-size:43px;line-height:1.2;color:var(--voice);margin:0 0 36px}.team-members{list-style:none;margin:0;padding:26px 0 0;border-top:1px solid var(--line)}.team-members li{font-size:35px;line-height:1.35;margin:0 0 22px}.team-members li:last-child{margin-bottom:0}.team-photo{margin:0}.team-photo img{display:block;width:820px;height:615px;object-fit:contain}
+.title-slide .cover-logo{position:absolute;top:44px;right:64px;width:340px;height:auto;padding:18px 20px;background:#fff;border-radius:3px}
+</style>
+</head>
+<body>
+<header class="toolbar">
+  <span class="brand">MOBIE · DEMO</span>
+  <label for="jump" class="sr-only">Choose slide</label><select id="jump" aria-label="Choose slide"></select>
+  <span class="space"></span><button id="notes-button">Notes</button><button id="fullscreen">Full screen</button><button id="print">Print</button>
+</header>
+<main id="viewport"><div id="canvas">
+
+<section class="slide title-slide active" data-title="The Senior Association of mobie Users" aria-label="Slide 1 of 7" aria-hidden="false">
+  <img class="cover-logo" src="mobie-logo.svg" alt="mobie logo">
+  <p class="eyebrow">Summit Sprint Hackathon · 14 October 2026</p>
+  <h1>Find a ride.<br>Just make a call.</h1>
+  <p class="title-subtitle">A voice assistant that connects spoken addresses<br>to suitable rides in mobie.</p>
+  <div class="team"><p class="team-label">Presented by</p><p class="team-name">The Senior Association of mobie Users</p></div>
+  <div class="footer"><span>mobie · Demo presentation</span><span>01 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 10 seconds.</strong> Introduce the team: The Senior Association of mobie Users. Our goal is to make finding a ride accessible through a phone conversation, with special attention to difficult street and town names. Introduce the team members on the next slide, then continue with the passenger and driver use case.</p><p>Official mobie logo downloaded unchanged from <a href="https://mobie.at/logo/MB_logo_RGB.svg">mobie.at</a> on 15 October 2026. Local asset: mobie-logo.svg.</p></div>
+</section>
+
+<section class="slide team-slide" data-title="Our team" aria-label="Slide 2 of 7" aria-hidden="true">
+  <p class="eyebrow">The people behind the project</p>
+  <h1>Our team</h1>
+  <div class="team-grid">
+    <div><p class="association-name">The Senior Association<br>of mobie Users</p>
+      <ul class="team-members"><li>Louis Attendu</li><li>Erika Beteg</li><li>Petko Bozhinov</li></ul>
+    </div>
+    <figure class="team-photo"><img src="team-photo.jpeg" width="1600" height="1200" alt="Group photo of the three mobie hackathon team members"></figure>
+  </div>
+  <div class="footer"><span>mobie · Summit Sprint Hackathon</span><span>02 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 15 seconds.</strong> Introduce Louis Attendu, Erika Beteg and Petko Bozhinov. Team name: The Senior Association of mobie Users. Team photograph supplied by the user and stored alongside the presentation as team-photo.jpeg. Names are listed without assigning positions in the photograph.</p></div>
+</section>
+
+<section class="slide hero" data-title="Find a ride by phone" aria-label="Slide 3 of 7" aria-hidden="true">
+  <p class="eyebrow">The use case</p>
+  <div class="hero-grid">
+    <div><h1>Find a ride<br>by phone.</h1><p class="lead">A passenger describes a journey.<br>The assistant finds a ride and sends a request.</p></div>
+    <blockquote class="spoken"><p>„Ich möchte von<br>Villagarten 4 in Steyregg<br>zur Bethlehemstraße<br>in Linz fahren.“</p></blockquote>
+  </div>
+  <svg class="journey" viewBox="0 0 1472 182" role="img" aria-labelledby="journey-title journey-desc">
+    <title id="journey-title">Passenger and driver journey</title><desc id="journey-desc">A passenger calls Fonio. The assistant finds a ride. After passenger consent, a request is sent to mobie. The driver approves in the staging app.</desc>
+    <defs><marker id="arrow-usecase" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#91a5b2"/></marker></defs>
+    <line class="edge" x1="251" y1="55" x2="390" y2="55" marker-end="url(#arrow-usecase)"/><line class="edge" x1="650" y1="55" x2="790" y2="55" marker-end="url(#arrow-usecase)"/><line class="edge" x1="1050" y1="55" x2="1190" y2="55" marker-end="url(#arrow-usecase)"/>
+    <text class="svg-title" x="0" y="55">Passenger</text><text class="svg-body" x="0" y="96">Calls Fonio</text>
+    <text class="svg-title" x="410" y="55">Assistant</text><text class="svg-body" x="410" y="96">Finds a ride</text>
+    <text class="svg-title" x="810" y="55">Passenger</text><text class="svg-body" x="810" y="96">Confirms the request</text>
+    <text class="svg-title svg-green" x="1210" y="55">Driver</text><text class="svg-body" x="1210" y="96">Approves in the app</text>
+  </svg>
+  <p class="takeaway">One phone conversation. Two people. A real request in mobie staging.</p>
+  <div class="footer"><span>mobie · Summit Sprint Hackathon</span><span>03 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 35 seconds.</strong> Start with the passenger's goal. The driver has already created an offered ride using a separate approved staging account and vehicle. The passenger calls the Fonio assistant; the driver later approves the request in the app. Never describe a pending request as an accepted ride.</p><p>The example route comes from the challenge brief. It is a scenario, not evidence that a call or booking has succeeded. The implementation currently uses the passenger account signed into the local starter.</p><p>Source: <a href="../challenge.md">mobie challenge brief</a>.</p></div>
+</section>
+
+<section class="slide architecture" data-title="System landscape" aria-label="Slide 4 of 7" aria-hidden="true">
+  <p class="eyebrow">The overall architecture</p>
+  <h1>From phone call to ride request.</h1>
+  <p class="subtitle">Fonio reaches our app through ngrok. Our app connects Mapbox and mobie.</p>
+  <div class="content">
+  <svg class="architecture-diagram" viewBox="0 0 1440 520" role="img" aria-labelledby="demo-landscape-title demo-landscape-desc">
+<title id="demo-landscape-title">Architecture connections</title><desc id="demo-landscape-desc">The passenger calls Fonio. Fonio calls the local server through ngrok. The local server calls Mapbox and the mobie staging. The driver uses the app. Auth0 authorizes the starter in the laptop browser. The app contains inbound, string processing, Mapbox and mobie adapters.</desc>
+<defs><marker id="arrow-landscape-demo" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" fill="#91a5b2"/></marker></defs>
+<rect class="box" x="0" y="205" width="230" height="112" rx="5"/><text class="svg-title" x="20" y="246">Passenger</text><text class="svg-body" x="20" y="280">Calls Fonio</text>
+<rect class="box" x="300" y="205" width="230" height="112" rx="5"/><text class="svg-title" x="320" y="246">Fonio</text><text class="svg-body" x="320" y="280">Speech + dialogue</text>
+<rect class="box" x="600" y="205" width="230" height="112" rx="5"/><text class="svg-title" x="620" y="246">ngrok tunnel</text><text class="svg-body" x="620" y="280">Public HTTPS</text>
+<rect class="focus-box" x="900" y="205" width="230" height="112" rx="5"/><text class="svg-title" x="920" y="246">Our app</text><text class="svg-body" x="920" y="280">Bridge + logic</text>
+<rect class="box" x="1200" y="205" width="240" height="112" rx="5"/><text class="svg-title" x="1220" y="246">mobie staging</text><text class="svg-body" x="1220" y="280">Rides + requests</text>
+<path class="edge" d="M230 261H300" marker-start="url(#arrow-landscape-demo)" marker-end="url(#arrow-landscape-demo)"/><path class="edge" d="M530 261H600" marker-start="url(#arrow-landscape-demo)" marker-end="url(#arrow-landscape-demo)"/><path class="edge" d="M830 261H900" marker-start="url(#arrow-landscape-demo)" marker-end="url(#arrow-landscape-demo)"/><path class="edge" d="M1130 261H1200" marker-start="url(#arrow-landscape-demo)" marker-end="url(#arrow-landscape-demo)"/>
+<rect class="box" x="900" y="15" width="230" height="100" rx="5"/><text class="svg-title" x="920" y="56">Mapbox</text><text class="svg-body" x="920" y="88">Find coordinates</text><path class="edge" d="M1015 115V205" marker-start="url(#arrow-landscape-demo)" marker-end="url(#arrow-landscape-demo)"/>
+<rect class="box" x="1200" y="412" width="240" height="100" rx="5"/><text class="svg-title" x="1220" y="453">Driver app</text><text class="svg-body" x="1220" y="485">Offer + approve</text><path class="edge" d="M1320 317V412" marker-start="url(#arrow-landscape-demo)" marker-end="url(#arrow-landscape-demo)"/>
+<rect class="box" x="600" y="412" width="230" height="100" rx="5"/><text class="svg-title" x="620" y="453">Auth0 login</text><text class="svg-body" x="620" y="485">Passenger login</text><path class="edge" d="M830 462H1015V317" marker-end="url(#arrow-landscape-demo)"/>
+<text class="svg-small" x="0" y="465">Inside our app: Inbound + String processor</text><text class="svg-small" x="0" y="497">Mapbox adapter + mobie adapter</text>
+</svg>
+  <div class="implementation-strip"><p><strong>Implemented in code</strong><br>Input normalisation → geocoding → ride search / join</p><p class="planned"><strong>Next implementation</strong><br>Guided clarification + difficult-name matching</p></div>
+  </div>
+  <div class="footer"><span>Code reviewed against remote main · 14 October 2026</span><span>04 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 45 seconds.</strong> This uses the system-landscape layout from the technical architecture deck: Passenger → Fonio → ngrok → Our app → mobie staging. Mapbox connects above the app, Auth0 provides passenger login below, and the driver offers/approves rides through the staging app. Mapbox and Auth0 connect directly from the app rather than through ngrok. The inbound TripSearchService orchestrates the current app calls. StringProcessingService currently trims/collapses whitespace, validates seats and normalises date/time using Europe/Vienna. It does not implement phonetic or fuzzy address matching. Mapbox currently returns candidates; the trip service takes the first candidate for each address and searches mobie. That is the baseline we aim to improve.</p><p>Current remote routes include POST /api/trips/search and POST /api/trips/join. The proposed guided contract uses different routes, including /ride/join; do not imply those guided endpoints exist. Current code retains recent search records in memory. Stateless guided requests, system-sourced correlation and signed selection references remain proposed.</p><p>The current join wrapper looks up a recent rideId, submits one seat and passes confirmed=true internally. Spoken consent must be enforced in the assistant; the demo deck does not claim server-side consent binding or full end-to-end verification.</p><p>Code evidence: <a href="https://github.com/3phase/mobie-hackathon-starter/blob/13dad32/src/inbound/trip-search.service.ts">Trip search and join</a>, <a href="https://github.com/3phase/mobie-hackathon-starter/blob/13dad32/src/string-processing/string-processing.service.ts">Input processing</a>, <a href="../api.md">mobie API reference</a>.</p></div>
+</section>
+
+<section class="slide problem" data-title="Wrong location, several options, misheard names" aria-label="Slide 5 of 7" aria-hidden="true">
+  <p class="eyebrow">The problem · illustrative examples</p>
+  <h1>The street and the town must both be right.</h1>
+  <p class="subtitle">Three ways a spoken request can lead to the wrong location.</p>
+  <div class="problem-grid">
+    <div><p class="issue-number">01</p><h2>Wrong street + town</h2><p class="example-label">Caller input</p><p class="case-input">“Villagarten 4,<br>Steyregg”</p><p class="example-label">Potential wrong result</p><p class="case-output">Gartenstraße,<br>Sulz</p><p class="guard">Check the street within the intended town.</p></div>
+    <div><p class="issue-number">02</p><h2>Multiple valid options</h2><p class="example-label">Caller input</p><p class="case-input">“Gartenstraße”</p><p class="example-label">Possible locations</p><p class="case-output">A: Gartenstraße, Sulz<br>B: Gartenstraße, Klaus</p><p class="guard">Ask which place is intended instead of taking the first match.</p></div>
+    <div><p class="issue-number">03</p><h2>Misheard town or street</h2><p class="example-label">Caller input</p><p class="case-input">“Steyregg”</p><p class="example-label">System hears</p><p class="case-output">“Steiregg”</p><p class="guard">Look for similar names, then clarify if needed.</p></div>
+  </div>
+  <p class="takeaway">Our goal: the intended street in the intended town, with ambiguity resolved.</p>
+  <div class="footer"><span>Address resolution is our main challenge</span><span>05 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 45 seconds.</strong> These are three distinct risks. First, a weak match can substitute both the street and municipality: the proposed candidate must be checked against all supplied components. Second, a street name without enough context can produce several valid places, requiring a targeted question or a short choice. Third, a misheard name can differ slightly from a real town or street name. The planned Levenshtein method on slide 7 helps suggest similar names. A misheard name may also be another real place, so spelling similarity alone cannot prove intent.</p><p>All input/result pairings are illustrative, not recorded Fonio transcripts or actual Mapbox responses. The first pair deliberately contrasts two different challenge addresses to illustrate an unacceptable match; it does not claim that Mapbox returned Gartenstraße in Sulz for a Villagarten query. Steyregg/Steiregg illustrates a possible transcription error, not an observed call result. The challenge brief supplies Gartenstraße in both 6832 Sulz and 6833 Klaus.</p><p>The strategy is to preserve geographic context, compare candidate components and resolve ambiguity before relying on coordinates. Our agreed unique-match path still advances without an extra address confirmation; the complete passenger trip is read before booking consent so the caller can correct it. A single result or an available ride is not proof of intent. The current baseline picks the first candidate, while this validation policy remains proposed.</p><p>Sources: <a href="../challenge.md">Challenge address examples</a>, <a href="../architecture/voice-ride-booking.md#string-processor-scope-and-error-model">String processor scope and error model</a>.</p></div>
+</section>
+
+<section class="slide staged" data-title="From the right address to the right ride" aria-label="Slide 6 of 7" aria-hidden="true">
+  <p class="eyebrow">Solutions to issues 01 and 02 · target experience</p>
+  <h1>From the right address to the right ride.</h1>
+  <p class="subtitle">The town narrows the street search. A short choice resolves several valid matches.</p>
+  <div class="guided-grid">
+    <div class="address-stages"><h2>01 · Right street, right town</h2>
+    <svg class="funnel" viewBox="0 0 780 490" role="img" aria-labelledby="funnel-title funnel-desc">
+      <title id="funnel-title">Progressively constrain address search</title><desc id="funnel-desc">Begin with Austria. Narrow by city or municipality and a postcode if known, then street, then house number. Identify the exact location for both the starting address and destination. An unknown postcode does not block city-first lookup. This is a conceptual search-space reduction, not measured candidate counts.</desc>
+      <path d="M0 0H780L746 78H34Z" fill="#253540" stroke="#718795" stroke-width="1.4"/><text x="390" y="49" text-anchor="middle" class="svg-title">Austria</text>
+      <path d="M34 98H746L699 176H81Z" fill="#293b44" stroke="#718795" stroke-width="1.4"/><text x="390" y="132" text-anchor="middle" class="svg-title">Town / city</text><text x="390" y="160" text-anchor="middle" class="svg-small">+ postcode when known</text>
+      <path d="M81 196H699L645 274H135Z" fill="#2d4148" stroke="#91a5b2" stroke-width="1.4"/><text x="390" y="245" text-anchor="middle" class="svg-title">Street</text>
+      <path d="M135 294H645L586 372H194Z" fill="#33494b" stroke="#a6c7bc" stroke-width="1.5"/><text x="390" y="343" text-anchor="middle" class="svg-title">House number</text>
+      <path d="M194 392H586L541 470H239Z" fill="#3d4947" stroke="#dfb17f" stroke-width="1.8"/><text x="390" y="440" text-anchor="middle" class="svg-title">Exact location</text>
+    </svg>
+      <p class="address-note">For your starting point and destination.</p>
+    </div>
+    <div class="ride-stages">
+      <div><h2>Find a ride</h2><p class="question">“What day, what time, and how many people?”</p><p class="explanation">Search for a ride between the two places that fits your plans.</p></div>
+      <div><h2>You decide</h2><p class="question">“Shall I send the request?”</p><p class="explanation">Hear the trip, pickup time and driver details before you agree.</p></div>
+    </div>
+  </div>
+  <p class="takeaway">02 · Multiple valid options? We offer a short choice and let you decide.</p>
+  <div class="footer"><span>Already told us a detail? We use it. The driver still needs to approve the request.</span><span>06 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 50 seconds, then the demo.</strong> This slide addresses the first two problems: wrong street/town combinations and multiple valid locations. The funnel explains the staged address approach: identify the town, then the street and house number within it, until the place is precise enough to use. Repeat for starting point and destination. A postcode is helpful but optional. Use details the caller already supplied instead of asking again.</p><p>The funnel shows conceptual narrowing, not measured candidate counts or success rates. A clear location match lets the conversation continue. Several plausible matches lead to a short spoken choice, and an unclear match leads to a focused question. Clarify conflicting details rather than silently replacing them.</p><p>Then collect date, time and passenger count together. If a suitable ride exists, read the full journey, pickup details and driver information before asking permission to send the request. Allow corrections. If no ride is found, explain that result. The driver still approves the request separately.</p><p>This slide describes the target experience, not evidence of a successful live call or booking. Demonstrate only functionality that has actually been exercised. Reference: <a href="../specs/fonio-guided-booking-contract.md">Guided conversation contract and Fonio setup</a>.</p></div>
+</section>
+
+<section class="slide spelling" data-title="Misheard names: Levenshtein matching" aria-label="Slide 7 of 7" aria-hidden="true">
+  <p class="eyebrow">Issue 03 · Levenshtein matching · planned</p>
+  <h1>Similar spelling helps us find the name.</h1>
+  <p class="subtitle">Count the letters to add, remove or change. Fewer changes mean a closer spelling.</p>
+  <div class="spelling-grid">
+    <div class="spelling-example">
+      <p class="example-label">What the system hears</p>
+      <p class="word-example">Ste<span class="changed-letter">i</span>regg</p>
+      <p class="example-label">A similar real town name</p>
+      <p class="word-example">Ste<span class="matched-letter">y</span>regg</p>
+      <p class="edit-summary">One letter changes: <strong>i</strong> becomes <strong>y</strong>.</p>
+      <p class="example-caption">An illustrative suggestion, not an automatic correction.</p>
+    </div>
+    <ol class="matching-steps">
+      <li><h2>Find similar names</h2><p>Compare the heard name with real town or street names.</p></li>
+      <li><h2>Keep the right area</h2><p>Use the postcode when known. Look for streets within the chosen town.</p></li>
+      <li><h2>Clarify the suggestion</h2><p>“Did you mean Steyregg?”<br>Let the caller resolve uncertain matches.</p></li>
+    </ol>
+  </div>
+  <p class="takeaway">Similar spelling helps suggest a place. It cannot prove what the caller meant.</p>
+  <div class="footer"><span>Planned in the string processor · spelling similarity, not sound recognition</span><span>07 / 07</span></div>
+  <div class="speaker-notes"><p><strong>About 45 seconds.</strong> This addresses problem 03: a misheard town or street name. Levenshtein distance is the smallest number of single-character insertions, deletions and substitutions needed to turn one string into another. After applying the same basic text normalisation to both strings, the illustrative Steiregg/Steyregg pair differs by one substitution. Smaller distance means closer spelling, not a probability that the address is correct.</p><p>This is a planned matching step. The checked-out address-elaboration branch has no Levenshtein implementation in StringProcessingService or AddressResolutionService. It needs a source of real candidate names to compare; edit distance alone cannot generate or geocode an address. If an initial Mapbox query yields no candidates, candidate retrieval or bounded variants need a separate design. Compare street names within the resolved town and respect supplied postcode evidence. Do not let similarity override conflicting geographic details.</p><p>Use this as a supporting signal for suggestions, with targeted clarification for uncertain or changed names. A wrong transcription can exactly match another real place, so even distance zero is not proof of intent. Levenshtein compares spelling and does not model pronunciation, dialect or audio recognition. Thresholds and false corrections need evaluation on real examples before claiming improved performance.</p><p>Method definition: <a href="https://xlinux.nist.gov/dads/HTML/Levenshtein.html">NIST Dictionary of Algorithms and Data Structures: Levenshtein distance</a>. Code checked: src/string-processing/string-processing.service.ts and src/voice/services/address-resolution.service.ts.</p></div>
+</section>
+
+</div></main>
+<footer class="controls"><button id="prev" aria-label="Previous slide">←</button><span id="count" class="count" aria-live="polite"></span><button id="next" aria-label="Next slide">→</button><span class="hint">Arrow keys · N for notes · F for full screen · Print exports all seven slides</span><span id="status" class="sr-only" role="status"></span></footer>
+<div id="progress" class="progress" aria-hidden="true"></div>
+<dialog id="notes" aria-labelledby="notes-title"><header><h2 id="notes-title"></h2><button id="notes-close" aria-label="Close speaker notes">Close</button></header><div id="notes-body"></div></dialog>
+<script>
+const slides=[...document.querySelectorAll('.slide')];
+const canvas=document.querySelector('#canvas'),viewport=document.querySelector('#viewport'),jump=document.querySelector('#jump'),notes=document.querySelector('#notes');
+let index=0;
+slides.forEach((slide,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=`${String(i+1).padStart(2,'0')}  ${slide.dataset.title}`;jump.append(option)});
+function fit(){const scale=Math.min(viewport.clientWidth/1600,viewport.clientHeight/900);canvas.style.transform=`scale(${scale})`;canvas.style.left=`${(viewport.clientWidth-1600*scale)/2}px`;canvas.style.top=`${(viewport.clientHeight-900*scale)/2}px`}
+function show(i,updateHash=true){index=Math.max(0,Math.min(slides.length-1,i));slides.forEach((s,n)=>{s.classList.toggle('active',n===index);s.setAttribute('aria-hidden',String(n!==index))});jump.value=String(index);document.querySelector('#count').textContent=`${index+1} / ${slides.length}`;document.querySelector('#prev').disabled=index===0;document.querySelector('#next').disabled=index===slides.length-1;document.querySelector('#progress').style.width=`${(index+1)/slides.length*100}%`;if(updateHash)history.replaceState(null,'',`#slide-${index+1}`)}
+function openNotes(){document.querySelector('#notes-title').textContent=`${index+1}. ${slides[index].dataset.title}`;document.querySelector('#notes-body').replaceChildren(...slides[index].querySelector('.speaker-notes').cloneNode(true).childNodes);notes.showModal()}
+async function fullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch{document.querySelector('#status').textContent='Full screen is unavailable in this browser.'}}
+document.querySelector('#prev').addEventListener('click',()=>show(index-1));document.querySelector('#next').addEventListener('click',()=>show(index+1));jump.addEventListener('change',()=>show(Number(jump.value)));
+document.querySelector('#notes-button').addEventListener('click',openNotes);document.querySelector('#notes-close').addEventListener('click',()=>notes.close());document.querySelector('#fullscreen').addEventListener('click',fullscreen);document.querySelector('#print').addEventListener('click',()=>window.print());
+document.addEventListener('keydown',e=>{if(notes.open||['SELECT','INPUT','TEXTAREA'].includes(document.activeElement.tagName))return;if(document.activeElement.tagName==='BUTTON'&&[' ','Enter'].includes(e.key))return;if(['ArrowRight','ArrowDown','PageDown',' '].includes(e.key)){e.preventDefault();show(index+1)}if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){e.preventDefault();show(index-1)}if(e.key==='Home'){e.preventDefault();show(0)}if(e.key==='End'){e.preventDefault();show(slides.length-1)}if(e.key.toLowerCase()==='n')openNotes();if(e.key.toLowerCase()==='f')fullscreen()});
+window.addEventListener('resize',fit);document.addEventListener('fullscreenchange',fit);window.addEventListener('hashchange',()=>{const m=location.hash.match(/^#slide-(\d+)$/);if(m)show(Number(m[1])-1,false)});
+const initial=location.hash.match(/^#slide-(\d+)$/);show(initial?Number(initial[1])-1:0,false);fit();
+</script>
+</body>
+</html>
