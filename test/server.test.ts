@@ -25,22 +25,108 @@ const rideSearchResponse = [{
 const config: AppConfig = {
   apiKey: key, issuer: 'https://auth.example', clientId: 'client', audience: 'https://staging.example',
   redirectUri: 'http://localhost:3000/callback', baseUrl: 'https://staging.example', mapboxToken: 'mapbox-token',
+  openPlzBaseUrl: 'https://openplzapi.org', openPlzCacheTtlMs: 86_400_000,
+  openPlzCacheMaxEntries: 100, openPlzTimeoutMs: 8_000, openPlzRetries: 0,
   port: 3000, host: '127.0.0.1',
 };
+
+const openPlzMunicipalities = {
+  '1030': { key: '90001', code: '90001', name: 'Wien', status: 'Statutarstadt' },
+  '4020': { key: '40101', code: '40101', name: 'Linz', status: 'Statutarstadt' },
+} as const;
+
+function openPlzResponse(url: URL): Response {
+  const postcode = url.searchParams.get('postalCode') as keyof typeof openPlzMunicipalities;
+  const name = url.searchParams.get('name') ?? '';
+  if (!postcode) {
+    const steyr = { key: '40201', code: '40201', name: 'Steyr', status: 'Statutarstadt' };
+    const steyregg = { key: '41624', code: '41624', name: 'Steyregg', status: 'Stadtgemeinde' };
+    const linz = openPlzMunicipalities['4020'];
+    const linzLand = { key: '41099', code: '41099', name: 'Linz-Land', status: 'Gemeinde' };
+    const province = { key: '4', name: 'Oberösterreich' };
+    const district = { key: '401', code: '401', name: 'Testbezirk' };
+    let body: unknown[] = [];
+    if (url.pathname.endsWith('/Localities') && /steyr/i.test(name)) {
+      body = [
+        { key: 'loc-steyr', name: 'Steyr', postalCode: '4400', municipality: steyr, district, federalProvince: province },
+        { key: 'loc-steyregg', name: 'Steyr', postalCode: '4221', municipality: steyregg, district, federalProvince: province },
+      ];
+    } else if (url.pathname.endsWith('/Localities') && /linz/i.test(name)) {
+      body = [
+        { key: 'loc-linz', name: 'Linz', postalCode: '4020', municipality: linz, district, federalProvince: province },
+        { key: 'loc-linz-land', name: 'Linz', postalCode: '4060', municipality: linzLand, district, federalProvince: province },
+      ];
+    } else if (url.pathname.endsWith('/Streets') && /stadtplatz/i.test(name)) {
+      body = [
+        { key: 'street-steyr-a', name: 'Stadtplatz', postalCode: '4400', locality: 'Steyr', municipality: steyr, district, federalProvince: province },
+        { key: 'street-steyr-b', name: 'Stadtplatz', postalCode: '4407', locality: 'Steyr-Gleink', municipality: steyr, district, federalProvince: province },
+      ];
+    } else if (url.pathname.endsWith('/Streets') && /hauptplatz/i.test(name)) {
+      body = [
+        { key: 'street-linz-a', name: 'Hauptplatz', postalCode: '4020', locality: 'Linz', municipality: linz, district, federalProvince: province },
+        { key: 'street-linz-b', name: 'Hauptplatz', postalCode: '4040', locality: 'Linz-Urfahr', municipality: linz, district, federalProvince: province },
+      ];
+    }
+    return Response.json(body, { headers: {
+      'x-page': '1', 'x-page-size': '50', 'x-total-count': String(body.length),
+      'x-total-pages': body.length === 0 ? '0' : '1',
+    } });
+  }
+  const municipality = openPlzMunicipalities[postcode];
+  const localityName = postcode === '4020' ? 'Linz' : 'Wien, Landstraße';
+  const base = {
+    postalCode: postcode,
+    municipality,
+    district: { key: postcode === '4020' ? '401' : '900', code: postcode === '4020' ? '401' : '903', name: localityName },
+    federalProvince: { key: postcode === '4020' ? '4' : '9', name: postcode === '4020' ? 'Oberösterreich' : 'Wien' },
+  };
+  const body = url.pathname.endsWith('/Localities')
+    ? [{ ...base, key: `locality-${postcode}`, name: localityName }]
+    : [{ ...base, key: `street-${postcode}`, name: postcode === '4020' ? 'Hauptplatz' : 'Landstraßer Hauptstraße', locality: localityName }];
+  return Response.json(body, { headers: {
+    'x-page': '1', 'x-page-size': '50', 'x-total-count': '1', 'x-total-pages': '1',
+  } });
+}
 
 async function fixture(t: test.TestContext): Promise<{
   app: INestApplication;
   writes: () => number;
   joinedPayloads: () => Record<string, unknown>[];
+  addressGeocodes: () => number;
 }> {
   let writes = 0;
+  let addressGeocodes = 0;
   const joinedPayloads: Record<string, unknown>[] = [];
   const fetch: FetchFunction = async (input, init) => {
     const url = String(input);
     if (url.endsWith('/oauth/token')) {
       return Response.json({ access_token: 'private-access', refresh_token: 'private-refresh', expires_in: 3600, token_type: 'Bearer' });
     }
+    if (url.startsWith('https://openplzapi.org/')) return openPlzResponse(new URL(url));
     if (url.includes('api.mapbox.com')) {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('address_number')) {
+        addressGeocodes += 1;
+        const street = parsed.searchParams.get('street')!;
+        const postcode = parsed.searchParams.get('postcode')!;
+        const houseNumber = parsed.searchParams.get('address_number')!;
+        const city = parsed.searchParams.get('place')!;
+        return Response.json({ features: [{
+          id: `address.${postcode}.${houseNumber}`,
+          geometry: { coordinates: postcode === '4020' ? [14.286, 48.306] : [16.39, 48.197] },
+          properties: {
+            feature_type: 'address', name: `${street} ${houseNumber}`,
+            full_address: `${street} ${houseNumber}, ${postcode} ${city}`,
+            context: {
+              address: { address_number: houseNumber, street_name: street, name: `${street} ${houseNumber}` },
+              street: { name: street },
+              postcode: { name: postcode },
+              place: { name: city },
+            },
+            match_code: { address_number: 'exact', street: 'exact', postcode: 'exact', place: 'exact' },
+          },
+        }], attribution: 'Mapbox' });
+      }
       return Response.json({ features: [{ geometry: { coordinates: [16.3, 48.2] }, properties: { name: 'Wien' } }], attribution: 'Mapbox' });
     }
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer private-access');
@@ -63,7 +149,7 @@ async function fixture(t: test.TestContext): Promise<{
   configureApplication(app);
   await app.init();
   t.after(async () => app.close());
-  return { app, writes: () => writes, joinedPayloads: () => joinedPayloads };
+  return { app, writes: () => writes, joinedPayloads: () => joinedPayloads, addressGeocodes: () => addressGeocodes };
 }
 
 async function signIn(app: INestApplication): Promise<{ cookie: string; authorize: URL }> {
@@ -248,4 +334,305 @@ test('trip join requires a string ID from a recent completed search', async (t) 
     .send({ rideId: 'unknown-ride' })
     .expect(404, { error: 'Trip not found in recent searches. Search for the trip before joining it.' });
   assert.equal(writes(), 0);
+});
+
+test('legacy rideId booking remains compatible with a recent trip search and string consent', async (t) => {
+  const { app, writes } = await fixture(t);
+  await signIn(app);
+  const server = app.getHttpServer();
+
+  const search = await request(server)
+    .post('/api/trips/search')
+    .set('Authorization', authorization)
+    .send({
+      departure: 'Villagarten 4, 4221 Steyregg',
+      destination: 'Bethlehemstraße, 4020 Linz',
+      time: '2026-10-15T18:00:00+02:00',
+      seatsRequested: 1,
+    })
+    .expect(200);
+
+  const booking = await request(server)
+    .post('/ride/join')
+    .set('Authorization', authorization)
+    .send({
+      sessionId: 'https://app.fonio.ai/inbox?id=legacy-booking',
+      rideId: search.body.rideDetails.rideId,
+      confirmed: 'true',
+      reply: 'Ja bitte',
+    })
+    .expect(200);
+
+  assert.equal(booking.body.status, 'PENDING_BOOKING');
+  assert.equal(booking.body.proposalToken, 'ride-1');
+  assert.equal(booking.body.data.rideId, 'ride-1');
+  assert.equal(writes(), 1);
+});
+
+test('voice routes collect independent addresses, reject stale choices, search rides and reuse booking', async (t) => {
+  const { app, writes, addressGeocodes } = await fixture(t);
+  await signIn(app);
+  const server = app.getHttpServer();
+  const headers = { Authorization: authorization };
+  const sessionId = 'fonio-call-123';
+
+  const originPostcode = await request(server)
+    .post('/api/voice/postcodes/search').set(headers)
+    .send({ sessionId, side: 'origin', postcode: ' 1030 ' }).expect(200);
+  assert.equal(originPostcode.body.data.postcode, '1030');
+  assert.equal(originPostcode.body.status, 'RESOLVED');
+  assert.equal(originPostcode.body.data.city, 'Wien');
+
+  const staleOriginAddress = await request(server)
+    .post('/api/voice/addresses/search').set(headers)
+    .send({ sessionId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
+  assert.equal(addressGeocodes(), 0, 'OpenPLZ discovery must not call Mapbox');
+  await request(server)
+    .post('/api/voice/postcodes/search').set(headers)
+    .send({ sessionId, side: 'origin', postcode: '1030' }).expect(200);
+  await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({ sessionId, side: 'origin', candidateId: staleOriginAddress.body.candidates[0].id })
+    .expect(200, {
+      status: 'INVALID_CONTEXT', sessionId, side: 'origin',
+      clarificationQuestion: 'That candidate is invalid or stale. Search again before selecting an option.',
+    });
+  const originAddress = await request(server)
+    .post('/api/voice/addresses/search').set(headers)
+    .send({ sessionId, side: 'origin', street: 'Landstraßer Hauptstraße', houseNumber: '12' }).expect(200);
+  await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({ sessionId, side: 'origin', candidateId: originAddress.body.candidates[0].id }).expect(200);
+  assert.equal(addressGeocodes(), 1);
+  const repeatedOriginConfirmation = await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({
+      sessionId,
+      from: { postcode: '1030', city: 'Wien', street: 'Landstraßer Hauptstraße', houseNumber: '12' },
+      candidateToken: originAddress.body.candidates[0].id,
+      confirmed: true,
+      reply: 'Option A',
+    }).expect(200);
+  assert.equal(repeatedOriginConfirmation.body.status, 'RESOLVED');
+  assert.equal(addressGeocodes(), 1, 'an idempotent confirmation must not geocode twice');
+
+  const unresolved = await request(server)
+    .post('/api/voice/rides/search').set(headers)
+    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+  assert.deepEqual(unresolved.body.data.unresolved, ['destination']);
+
+  const destinationPostcode = await request(server)
+    .post('/api/voice/postcodes/search').set(headers)
+    .send({ sessionId, side: 'destination', postcode: '4020' }).expect(200);
+  assert.equal(destinationPostcode.body.data.city, 'Linz');
+  const destinationAddress = await request(server)
+    .post('/api/voice/addresses/search').set(headers)
+    .send({ sessionId, side: 'destination', street: 'Hauptplatz', houseNumber: '1' }).expect(200);
+  assert.equal(addressGeocodes(), 1);
+  await request(server)
+    .post('/api/voice/addresses/confirm').set(headers)
+    .send({ sessionId, side: 'destination', candidateId: destinationAddress.body.candidates[0].id }).expect(200);
+  assert.equal(addressGeocodes(), 2);
+
+  const ride = await request(server)
+    .post('/api/voice/rides/search').set(headers)
+    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+  assert.equal(ride.body.status, 'RESOLVED');
+  assert.equal(ride.body.data.rideDetails.rideId, 'ride-1');
+  assert.equal(ride.body.proposalToken, 'ride-1');
+  const booking = await request(server).post('/ride/join').set(headers)
+    .send({ sessionId, proposalToken: ride.body.proposalToken, confirmed: true })
+    .expect(200);
+  assert.equal(booking.body.status, 'PENDING_BOOKING');
+  assert.equal(writes(), 1);
+
+  await request(server)
+    .post('/api/voice/sessions/end').set(headers).send({ sessionId }).expect(200, {
+      status: 'RESOLVED', sessionId, data: { deleted: true },
+    });
+  const expired = await request(server)
+    .post('/api/voice/rides/search').set(headers)
+    .send({ sessionId, requestedTime: '2026-10-20T09:00:00+02:00' }).expect(200);
+  assert.equal(expired.body.status, 'INVALID_CONTEXT');
+});
+
+test('all 12 Fonio webhook request contracts work with city-first resolution and explicit consent', async (t) => {
+  const { app, writes, joinedPayloads } = await fixture(t);
+  await signIn(app);
+  const server = app.getHttpServer();
+  const headers = { Authorization: authorization };
+
+  // 1. mobie_search_from_postcode
+  const fromPostcode = await request(server).post('/api/voice/postcodes/search').set(headers).send({
+    sessionId: 'fonio-postcode-contract',
+    from: { postcode: '1030' },
+  }).expect(200);
+  assert.equal(fromPostcode.body.side, 'origin');
+  assert.equal(fromPostcode.body.data.postcode, '1030');
+
+  // 6. mobie_search_destination_postcode
+  const destinationPostcode = await request(server).post('/api/voice/postcodes/search').set(headers).send({
+    sessionId: 'fonio-postcode-contract',
+    destination: { postcode: '4020' },
+  }).expect(200);
+  assert.equal(destinationPostcode.body.side, 'destination');
+  assert.equal(destinationPostcode.body.data.postcode, '4020');
+
+  const sessionId = 'fonio-12-contracts';
+
+  // 2. mobie_search_from_city (blank postcode is intentionally unknown)
+  const fromCity = await request(server).post('/api/voice/cities/search').set(headers).send({
+    sessionId,
+    from: { postcode: '', city: 'Steyr' },
+  }).expect(200);
+  assert.equal(fromCity.body.status, 'NEEDS_CLARIFICATION');
+  assert.equal(fromCity.body.data.resolutionStatus, 'AMBIGUOUS');
+  assert.equal(fromCity.body.candidates[0].candidateToken, fromCity.body.candidates[0].id);
+  assert.equal(fromCity.body.candidates[0].optionLabel, 'option A');
+
+  // 3. mobie_select_from_city: declining preserves the candidates; a later explicit choice applies it.
+  const declinedCity = await request(server).post('/api/voice/cities/confirm').set(headers).send({
+    sessionId,
+    from: { postcode: '', city: 'Steyr' },
+    candidateToken: 'option A',
+    confirmed: 'false',
+    reply: 'Nein, noch nicht',
+  }).expect(200);
+  assert.equal(declinedCity.body.status, 'DECLINED');
+  const selectedFromCity = await request(server).post('/api/voice/cities/confirm').set(headers).send({
+    sessionId,
+    from: { postcode: '', city: 'Steyr' },
+    candidateToken: 'option A',
+    confirmed: 'true',
+    reply: 'Option A',
+  }).expect(200);
+  assert.equal(selectedFromCity.body.data.city, 'Steyr');
+  assert.equal(selectedFromCity.body.data.postcode, undefined);
+
+  // 4. mobie_search_from_address: OpenPLZ derives canonical postcode candidates from the city.
+  const fromAddress = await request(server).post('/api/voice/addresses/search').set(headers).send({
+    sessionId,
+    from: { postcode: '', city: 'Steyr', street: 'Stadtplatz', houseNumber: '1' },
+  }).expect(200);
+  assert.equal(fromAddress.body.data.resolutionStatus, 'AMBIGUOUS');
+  assert.equal(fromAddress.body.candidates.length, 2);
+
+  // 5. mobie_select_from_address
+  const selectedFromAddress = await request(server).post('/api/voice/addresses/confirm').set(headers).send({
+    sessionId,
+    from: { postcode: '', city: 'Steyr', street: 'Stadtplatz', houseNumber: '1' },
+    candidateToken: 'option A',
+    confirmed: true,
+    reply: 'Option A',
+  }).expect(200);
+  assert.equal(selectedFromAddress.body.status, 'RESOLVED');
+  assert.equal(selectedFromAddress.body.data.postcode, '4400');
+  const staleFromOption = await request(server).post('/api/voice/addresses/confirm').set(headers).send({
+    sessionId,
+    from: { postcode: '', city: 'Steyr', street: 'Stadtplatz', houseNumber: '1' },
+    candidateToken: 'option A',
+    confirmed: true,
+    reply: 'Option A',
+  }).expect(200);
+  assert.equal(staleFromOption.body.status, 'INVALID_CONTEXT');
+
+  // 7. mobie_search_destination_city
+  const destinationCity = await request(server).post('/api/voice/cities/search').set(headers).send({
+    sessionId,
+    destination: { postcode: '', city: 'Linz' },
+  }).expect(200);
+  assert.equal(destinationCity.body.data.resolutionStatus, 'AMBIGUOUS');
+
+  // 8. mobie_select_destination_city (actual candidate token, not a label)
+  const selectedDestinationCity = await request(server).post('/api/voice/cities/confirm').set(headers).send({
+    sessionId,
+    destination: { postcode: '', city: 'Linz' },
+    candidateToken: destinationCity.body.candidates[0].candidateToken,
+    confirmed: true,
+    reply: 'Option A',
+  }).expect(200);
+  assert.equal(selectedDestinationCity.body.data.city, 'Linz');
+
+  // 9. mobie_search_destination_address
+  const destinationAddress = await request(server).post('/api/voice/addresses/search').set(headers).send({
+    sessionId,
+    destination: { postcode: '', city: 'Linz', street: 'Hauptplatz', houseNumber: '1' },
+  }).expect(200);
+  assert.equal(destinationAddress.body.data.resolutionStatus, 'AMBIGUOUS');
+
+  // 10. mobie_select_destination_address
+  const selectedDestinationAddress = await request(server).post('/api/voice/addresses/confirm').set(headers).send({
+    sessionId,
+    destination: { postcode: '', city: 'Linz', street: 'Hauptplatz', houseNumber: '1' },
+    candidateToken: 'option A',
+    confirmed: true,
+    reply: 'Option A',
+  }).expect(200);
+  assert.equal(selectedDestinationAddress.body.status, 'RESOLVED');
+  assert.equal(selectedDestinationAddress.body.data.postcode, '4020');
+
+  const fullFrom = {
+    postcode: '4400', city: 'Steyr', street: 'Stadtplatz', houseNumber: '1',
+    publicName: 'stale Fonio origin', addressLine: 'stale Fonio origin', longitude: 1, latitude: 1,
+  };
+  const fullDestination = {
+    postcode: '4020', city: 'Linz', street: 'Hauptplatz', houseNumber: '1',
+    publicName: 'stale Fonio destination', addressLine: 'stale Fonio destination', longitude: 2, latitude: 2,
+  };
+
+  // 11. mobie_search_ride
+  const ride = await request(server).post('/api/voice/rides/search').set(headers).send({
+    sessionId,
+    from: fullFrom,
+    destination: fullDestination,
+    time: '2026-10-20T09:00:00+02:00',
+    seatsRequested: 2,
+  }).expect(200);
+  assert.equal(ride.body.status, 'RESOLVED');
+  assert.equal(ride.body.proposalToken, 'ride-1');
+  assert.equal(ride.body.data.proposalToken, 'ride-1');
+
+  // 12. mobie_confirm_booking: false never writes; true returns a pending booking.
+  const bookingBody = {
+    sessionId,
+    from: fullFrom,
+    destination: fullDestination,
+    time: '2026-10-20T09:00:00+02:00',
+    seatsRequested: 2,
+    proposalToken: ride.body.proposalToken,
+    confirmed: 'false',
+    reply: 'Nein',
+  };
+  const declinedBooking = await request(server).post('/ride/join').set(headers).send(bookingBody).expect(200);
+  assert.equal(declinedBooking.body.status, 'DECLINED');
+  assert.equal(writes(), 0);
+
+  await request(server).post('/ride/join').set(headers).send({
+    ...bookingBody,
+    confirmed: 'yes',
+  }).expect(400, { error: 'confirmed must be true or false.' });
+  assert.equal(writes(), 0);
+
+  const booked = await request(server).post('/ride/join').set(headers).send({
+    ...bookingBody,
+    confirmed: 'true',
+    reply: 'Ja, bitte buchen',
+  }).expect(200);
+  assert.equal(booked.body.status, 'PENDING_BOOKING');
+  assert.equal(booked.body.data.booking.rideRequest.status, 'PENDING');
+  assert.equal(writes(), 1);
+  assert.equal((joinedPayloads()[0]?.departure as { longitude: number }).longitude, 16.39);
+  assert.equal((joinedPayloads()[0]?.destination as { longitude: number }).longitude, 14.286);
+
+  await request(server).post('/api/voice/addresses/search').set(headers).send({
+    sessionId,
+    from: { postcode: '4400', city: 'Steyr', street: 'Stadtplatz', houseNumber: '2' },
+  }).expect(200);
+  const staleBooking = await request(server).post('/ride/join').set(headers).send({
+    ...bookingBody,
+    confirmed: true,
+    reply: 'Ja',
+  }).expect(200);
+  assert.equal(staleBooking.body.status, 'INVALID_CONTEXT');
+  assert.equal(writes(), 1);
 });

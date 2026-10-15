@@ -13,6 +13,8 @@ import { MobieService } from '../src/mobie/mobie.service.js';
 const baseConfig: AppConfig = {
   issuer: 'https://tenant.example', clientId: 'client', audience: 'audience', redirectUri: 'http://localhost:3000/callback',
   baseUrl: 'https://staging.example', apiKey: 'test-key-with-at-least-32-characters', mapboxToken: '', port: 3000, host: '127.0.0.1',
+  openPlzBaseUrl: 'https://openplzapi.org', openPlzCacheTtlMs: 86_400_000,
+  openPlzCacheMaxEntries: 100, openPlzTimeoutMs: 8_000, openPlzRetries: 2,
 };
 const ride = {
   departure: { publicName: 'Start', latitude: 48.2, longitude: 16.3 },
@@ -102,4 +104,55 @@ test('Mapbox results map longitude and latitude correctly without leaking provid
     attribution: 'Mapbox',
   });
   await assert.rejects(async () => service.searchLocations(''), (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && error.status === 400));
+});
+
+test('Mapbox v6 structured addresses read street and house number from context', async () => {
+  const config = { ...baseConfig, mapboxToken: 'mapbox-secret' };
+  const fetch: FetchFunction = async (input) => {
+    const parsed = new URL(String(input));
+    assert.equal(parsed.searchParams.get('street'), 'Mollardgasse');
+    assert.equal(parsed.searchParams.get('address_number'), '22');
+    assert.equal(parsed.searchParams.get('postcode'), '1060');
+    assert.equal(parsed.searchParams.get('place'), 'Wien');
+    return Response.json({
+      features: [{
+        id: 'mapbox.mollardgasse-22',
+        geometry: { coordinates: [16.35162, 48.191674] },
+        properties: {
+          feature_type: 'address',
+          name: 'Mollardgasse 22',
+          full_address: 'Mollardgasse 22, 1060 Wien, Österreich',
+          match_code: {
+            address_number: 'matched', street: 'matched', postcode: 'matched', place: 'matched', confidence: 'exact',
+          },
+          context: {
+            address: { address_number: '22', street_name: 'Mollardgasse', name: 'Mollardgasse 22' },
+            street: { name: 'Mollardgasse' },
+            postcode: { name: '1060' },
+            place: { name: 'Wien' },
+          },
+        },
+      }],
+      attribution: 'Mapbox',
+    });
+  };
+  const service = new MapboxService(new MapboxClient(config, new UpstreamHttpClient(fetch)));
+  const result = await service.geocodeAddress({
+    street: 'Mollardgasse', houseNumber: '22', postcode: '1060', city: 'Wien',
+  });
+  assert.deepEqual(result.candidates[0], {
+    publicName: 'Mollardgasse 22',
+    addressLine: 'Mollardgasse 22, 1060 Wien, Österreich',
+    longitude: 16.35162,
+    latitude: 48.191674,
+    externalId: 'mapbox.mollardgasse-22',
+    featureType: 'address',
+    postcode: '1060',
+    city: 'Wien',
+    street: 'Mollardgasse',
+    houseNumber: '22',
+    matchCode: {
+      address_number: 'matched', street: 'matched', postcode: 'matched', place: 'matched', confidence: 'exact',
+    },
+  });
 });

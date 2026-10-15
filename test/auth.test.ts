@@ -15,6 +15,8 @@ const config: AppConfig = {
   baseUrl: 'https://staging.example',
   apiKey: 'test-key-with-at-least-32-characters',
   mapboxToken: '',
+  openPlzBaseUrl: 'https://openplzapi.org', openPlzCacheTtlMs: 86_400_000,
+  openPlzCacheMaxEntries: 100, openPlzTimeoutMs: 8_000, openPlzRetries: 2,
   port: 3000,
   host: '127.0.0.1',
 };

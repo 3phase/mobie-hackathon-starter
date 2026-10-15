@@ -6,12 +6,12 @@
       "request": "launch",
       "name": "Debug NestJS",
       "runtimeVersion": "24",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start:debug"],
+      "program": "${workspaceFolder}/src/main.ts",
+      "runtimeArgs": ["--env-file=.env", "--import", "tsx", "--watch"],
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "restart": true,
-      "skipFiles": ["<node_internals>/**"],
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"]
+      "skipFiles": ["<node_internals>/**"]
     }
   ]
 }

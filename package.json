@@ -9,9 +9,9 @@
   },
   "scripts": {
     "setup": "node scripts/setup.js",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-dist.js && tsc -p tsconfig.build.json",
     "start": "node --env-file=.env dist/main.js",
-    "start:debug": "nest start --debug --watch",
+    "start:debug": "node --env-file=.env --import tsx --watch src/main.ts",
     "start:prod": "node --env-file=.env dist/main.js",
     "dev": "tsx --env-file=.env watch src/main.ts",
     "lint": "eslint src test",
