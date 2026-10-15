@@ -43,6 +43,8 @@ export interface AddressState {
   readonly houseNumber?: string;
   readonly status: ResolutionStatus;
   readonly candidates: AddressCandidate[];
+  /** Candidate token that produced the currently confirmed address, for idempotent Fonio retries. */
+  readonly confirmedCandidateToken?: string;
   readonly resolvedLocation?: ResolvedLocation;
 }
 
@@ -51,6 +53,11 @@ export interface CallSession {
   readonly origin: AddressState;
   readonly destination: AddressState;
   readonly requestedTime?: string;
+  readonly seatsRequested?: number;
+  readonly selectedRide?: {
+    readonly rideId: string;
+    readonly proposalToken: string;
+  };
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -73,7 +80,9 @@ export type VoiceStatus =
   | 'NEEDS_CONFIRMATION'
   | 'NOT_FOUND'
   | 'INVALID_CONTEXT'
-  | 'INTEGRATION_UNAVAILABLE';
+  | 'INTEGRATION_UNAVAILABLE'
+  | 'DECLINED'
+  | 'PENDING_BOOKING';
 
 export interface VoiceApiResponse<T = unknown> {
   readonly status: VoiceStatus;
@@ -81,17 +90,23 @@ export interface VoiceApiResponse<T = unknown> {
   readonly side?: AddressSide;
   readonly data?: T;
   readonly candidates?: PublicAddressCandidate[];
+  readonly proposalToken?: string;
   readonly clarificationQuestion?: string;
 }
 
 export type PublicAddressCandidate = Omit<
   AddressCandidate,
   'kind' | 'city' | 'postcode' | 'street' | 'locality' | 'municipalityKey' | 'localityKey' | 'streetKey'
->;
+> & {
+  readonly candidateToken: string;
+  readonly optionLabel?: string;
+};
 
-export function publicCandidate(candidate: AddressCandidate): PublicAddressCandidate {
+export function publicCandidate(candidate: AddressCandidate, optionIndex?: number): PublicAddressCandidate {
   return {
     id: candidate.id,
+    candidateToken: candidate.id,
+    ...(optionIndex === undefined ? {} : { optionLabel: `option ${String.fromCharCode(65 + optionIndex)}` }),
     displayName: candidate.displayName,
     ...(candidate.score === undefined ? {} : { score: candidate.score }),
     ...(candidate.latitude === undefined ? {} : { latitude: candidate.latitude }),

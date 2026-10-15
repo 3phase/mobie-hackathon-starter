@@ -103,6 +103,23 @@ test('OpenPLZ normalizes the documented Austrian response schema', async () => {
   const raw = { ...locality, municipality: { ...municipality }, district: { ...district }, federalProvince: { ...federalProvince } };
   const service = new OpenPlzService(config, async () => pageResponse([raw], 1, 1));
   assert.deepEqual(await service.fetchLocalities('1030'), [locality]);
+
+  const municipalityWithoutStatus = { key: '41605', code: '41605', name: 'Engerwitzdorf' };
+  const withoutStatus = {
+    ...raw,
+    municipality: municipalityWithoutStatus,
+  };
+  const optionalStatus = new OpenPlzService(config, async () => pageResponse([withoutStatus], 1, 1));
+  assert.deepEqual(await optionalStatus.searchLocalities('^Linz'), [{
+    ...locality,
+    municipality: municipalityWithoutStatus,
+  }]);
+
+  const malformedStatus = new OpenPlzService(config, async () => pageResponse([{
+    ...raw,
+    municipality: { ...municipality, status: 42 },
+  }], 1, 1));
+  await assert.rejects(() => malformedStatus.searchLocalities('^Linz'), /municipality status/);
 });
 
 test('postcode cache reuses, deduplicates, expires and evicts only complete loads', async () => {

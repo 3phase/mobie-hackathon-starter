@@ -35,6 +35,11 @@ function requiredString(value: unknown, label: string): string {
   return value;
 }
 
+function optionalString(value: unknown, label: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requiredString(value, label);
+}
+
 function federalProvince(value: unknown): FederalProvinceSummary {
   const item = object(value, 'federal province');
   return { key: requiredString(item.key, 'federal province key'), name: requiredString(item.name, 'federal province name') };
@@ -51,16 +56,17 @@ function district(value: unknown): DistrictSummary {
 
 function municipality(value: unknown): MunicipalitySummary {
   const item = object(value, 'municipality');
+  const status = optionalString(item.status, 'municipality status');
   return {
     key: requiredString(item.key, 'municipality key'),
     code: requiredString(item.code, 'municipality code'),
     name: requiredString(item.name, 'municipality name'),
-    status: requiredString(item.status, 'municipality status'),
+    ...(status ? { status } : {}),
   };
 }
 
 function locality(value: unknown): LocalityEntry {
-  const item = object(value, 'locality');
+  const item = object(value, 'city');
   return {
     key: requiredString(item.key, 'locality key'),
     name: requiredString(item.name, 'locality name'),
@@ -116,6 +122,14 @@ export class OpenPlzService {
   public async searchLocalities(name: string): Promise<LocalityEntry[]> {
     const values = await this.fetchAllPages<unknown>('/at/Localities', { name }, 250);
     return values.map(locality);
+  }
+
+  public async searchStreets(name: string, localityName?: string): Promise<StreetEntry[]> {
+    const values = await this.fetchAllPages<unknown>('/at/Streets', {
+      name,
+      ...(localityName ? { locality: localityName } : {}),
+    }, 250);
+    return values.map(street);
   }
 
   public async fetchAllPages<T>(

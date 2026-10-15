@@ -13,7 +13,7 @@ export interface MunicipalitySummary {
   readonly key: string;
   readonly code: string;
   readonly name: string;
-  readonly status: string;
+  readonly status?: string;
 }
 
 export interface LocalityEntry {

@@ -25,6 +25,8 @@ function candidate(value: unknown, includeDetails: boolean): LocationCandidate |
   const coordinates = record(properties.coordinates) ?? {};
   const geometry = record(feature?.geometry);
   const context = record(properties.context) ?? {};
+  const contextAddress = record(context.address);
+  const contextStreet = record(context.street);
   const postcode = record(context.postcode);
   const contextPlace = record(context.place);
   const matchCodeRecord = record(properties.match_code);
@@ -39,7 +41,8 @@ function candidate(value: unknown, includeDetails: boolean): LocationCandidate |
   const featureType = string(properties.feature_type);
   const postcodeName = string(postcode?.name);
   const cityName = string(contextPlace?.name);
-  const houseNumber = string(properties.address_number);
+  const houseNumber = string(properties.address_number) ?? string(contextAddress?.address_number);
+  const streetName = string(contextStreet?.name) ?? string(contextAddress?.street_name) ?? name;
   const matchCode = matchCodeRecord
     ? Object.fromEntries(Object.entries(matchCodeRecord).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
     : undefined;
@@ -52,7 +55,7 @@ function candidate(value: unknown, includeDetails: boolean): LocationCandidate |
     ...(includeDetails && featureType ? { featureType } : {}),
     ...(includeDetails && postcodeName ? { postcode: postcodeName } : {}),
     ...(includeDetails && cityName ? { city: cityName } : {}),
-    ...(includeDetails && name ? { street: name } : {}),
+    ...(includeDetails && streetName ? { street: streetName } : {}),
     ...(includeDetails && houseNumber ? { houseNumber } : {}),
     ...(includeDetails && matchCode && Object.keys(matchCode).length > 0 ? { matchCode } : {}),
   };

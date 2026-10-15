@@ -84,9 +84,10 @@ export class AddressResolutionService {
 
   public async searchCity(city: string, postcode?: string): Promise<AddressCandidate[]> {
     const search = canonicalCitySearch(city);
-    const localities = postcode
-      ? (await this.cache.get(postcode)).localities
-      : await this.openPlz.searchLocalities(`^${escapeRegex(search)}`);
+    // const localities = postcode
+    //   ? (await this.cache.get(postcode)).localities
+    //   : await this.openPlz.searchLocalities(`^${escapeRegex(search)}`);
+    const localities = await this.openPlz.searchLocalities(`^${escapeRegex(search)}`);
     const candidates = new Map<string, AddressCandidate>();
     const municipalities = new Map<string, MunicipalitySummary>();
     for (const locality of localities) municipalities.set(locality.municipality.key, locality.municipality);
@@ -107,12 +108,18 @@ export class AddressResolutionService {
   }
 
   public async searchAddress(address: AddressState): Promise<AddressCandidate[]> {
-    if (!address.postcode || !address.street) return [];
+    if (!address.street) return [];
     const startedAt = Date.now();
-    const data = await this.cache.get(address.postcode);
-    const pool = data.streets.filter((street) => street.postalCode === address.postcode)
+    const streets = address.postcode
+      ? (await this.cache.get(address.postcode)).streets
+      : await this.openPlz.searchStreets(address.street);
+    const pool = streets
+      .filter((street) => !address.postcode || street.postalCode === address.postcode)
       .filter((street) => !address.municipalityKey || street.municipality.key === address.municipalityKey)
-      .filter((street) => !address.locality || normalizeAustrianAddress(street.locality) === normalizeAustrianAddress(address.locality));
+      .filter((street) => !address.locality || normalizeAustrianAddress(street.locality) === normalizeAustrianAddress(address.locality))
+      .filter((street) => address.municipalityKey || !address.city
+        || textSimilarity(address.city, street.municipality.name) >= 0.8
+        || textSimilarity(address.city, street.locality) >= 0.8);
     const ranked = this.streetMatcher.rank(address.street, pool);
     this.logger.log(`Ranked ${pool.length} OpenPLZ streets in ${Date.now() - startedAt}ms.`);
     const first = ranked[0];

@@ -117,3 +117,38 @@ test('final geocoding accepts only address-level results consistent with street,
   assert.equal(results[0]?.latitude, 48.2);
   assert.equal(fixture.mapboxCalls(), 1);
 });
+
+test('Molardgasse voice spelling resolves to canonical Mollardgasse 22', async () => {
+  const canonicalStreet: StreetEntry = {
+    ...street('mollardgasse', 'Mollardgasse'),
+    postalCode: '1060',
+    locality: 'Wien, Mariahilf',
+  };
+  const fixture = service(() => ({
+    postcode: '1060', fetchedAt: 1,
+    localities: [{ ...locality('mariahilf', 'Wien, Mariahilf'), postalCode: '1060' }],
+    streets: [canonicalStreet],
+  }), [{
+    publicName: 'Mollardgasse 22',
+    addressLine: 'Mollardgasse 22, 1060 Wien, Österreich',
+    longitude: 16.35162,
+    latitude: 48.191674,
+    externalId: 'mapbox.mollardgasse-22',
+    featureType: 'address',
+    postcode: '1060',
+    city: 'Wien',
+    street: 'Mollardgasse',
+    houseNumber: '22',
+    matchCode: { address_number: 'matched', street: 'matched', postcode: 'matched', place: 'matched' },
+  }]);
+  const address = {
+    postcode: '1060', city: 'Wien', municipalityKey: '90001', street: 'Molardgasse', houseNumber: '22',
+    status: 'COLLECTING' as const, candidates: [],
+  };
+  const candidates = await fixture.resolution.searchAddress(address);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.street, 'Mollardgasse');
+  const resolved = await fixture.resolution.geocodeAddress(address, candidates[0]);
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0]?.displayName, 'Mollardgasse 22, 1060 Wien, Österreich');
+});
